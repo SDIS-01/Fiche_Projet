@@ -248,6 +248,8 @@ details.al-g[open]>summary .t::before{content:"▾"}
 .p-al-ref{font-weight:bold;margin:0 0 1mm}
 .p-al-obj{font-size:9pt;font-weight:bold;color:var(--rouge);margin:1.5mm 0 .5mm}
 .p-al ul{margin:0;padding-left:5mm;font-size:9pt}
+.p-lignes div{height:6.5mm;border-bottom:.5pt dotted #9AA3AE}
+.p-tab tr.vide td{height:7mm}
 .p-meta span{display:block;font-size:7.5pt;color:#5B6674}
 .p-meta b{font-size:9.5pt}
 .p-sec{margin-bottom:4.5mm;break-inside:avoid-page}
@@ -967,8 +969,10 @@ function buildPrint(){
   const st = f.Projet_Cree ? 'Projet créé' : f.Statut_Fiche;
   const ratt = v => { if (v === 'projet' || !v) return 'Projet'; const a = c.actions.find(x => x.uid === v); return a ? (a.libelle || 'Action') : 'Projet'; };
   const has = v => v && String(v).trim();
-  const txt = (t, v) => has(v) ? `<section class="p-sec"><h3>${t}</h3><p class="p-txt">${esc(v)}</p></section>` : '';
-  const duo = (a, b) => (a && b) ? `<div class="p-2col">${a}${b}</div>` : (a || b);
+  const lignes = n => `<div class="p-lignes">${'<div></div>'.repeat(n)}</div>`;
+  const vides = (n, cols) => `<tr class="vide">${'<td></td>'.repeat(cols)}</tr>`.repeat(n);
+  const txt = (t, v, n = 3) => `<section class="p-sec"><h3>${t}</h3>${has(v) ? `<p class="p-txt">${esc(v)}</p>` : lignes(n)}</section>`;
+  const duo = (a, b) => `<div class="p-2col">${a}${b}</div>`;
   const nb = v => (v === '' || v == null) ? '' : new Intl.NumberFormat('fr-FR').format(Number(v));
   const rep = [f.Budget_Investissement !== '' && f.Budget_Investissement != null ? 'Invest. ' + money(f.Budget_Investissement) : '', f.Budget_Fonctionnement !== '' && f.Budget_Fonctionnement != null ? 'Fonct. ' + money(f.Budget_Fonctionnement) : ''].filter(Boolean).join(' / ');
   const meta = [
@@ -976,45 +980,48 @@ function buildPrint(){
     ['Échéance', fr(f.Echeance)], ['Budget global', money(f.Budget_Global)], ['Répartition', rep]
   ];
   const grps = S.grps.filter(x => f.Groupements_Impactes.includes(x.id)).map(x => x.label);
-  const pp = (has(f.Parties_Prenantes) || grps.length) ? `<section class="p-sec"><h3>Parties prenantes</h3>
-      ${has(f.Parties_Prenantes) ? `<p class="p-txt">${esc(f.Parties_Prenantes)}</p>` : ''}
-      ${grps.length ? `<p class="p-grp"><b>Groupements impactés :</b> ${grps.map(esc).join(', ')}</p>` : ''}</section>` : '';
+  const pp = `<section class="p-sec"><h3>Parties prenantes</h3>
+      ${has(f.Parties_Prenantes) ? `<p class="p-txt">${esc(f.Parties_Prenantes)}</p>` : lignes(2)}
+      <p class="p-grp"><b>Groupements impactés :</b> ${grps.length ? grps.map(esc).join(', ') : ''}</p>${grps.length ? '' : lignes(1)}</section>`;
   const alBlock = (k, titre) => {
-    const its = S.align[k].filter(x => f[k].includes(x.id)); if (!its.length) return '';
+    const its = S.align[k].filter(x => f[k].includes(x.id)); if (!its.length) return `<div class="p-al"><p class="p-al-ref">${titre}</p>${lignes(3)}</div>`;
     const objs = [...new Set(its.map(x => x.obj))];
     return `<div class="p-al"><p class="p-al-ref">${titre}</p>${objs.map(o => `<div class="p-al-obj">${esc(o)}</div><ul>${its.filter(x => x.obj === o).map(x => `<li>${esc(x.res || x.sous)}</li>`).join('')}</ul>`).join('')}</div>`;
   };
   const alPE = alBlock('Lien_PE', 'Projet d\'établissement 2023-2028'), alSD = alBlock('Lien_SDACR', 'SDACR 2025-2030');
-  const strat = (alPE || alSD) ? `<section class="p-sec"><h3>Alignement stratégique</h3>${duo(alPE, alSD)}</section>` : '';
+  const strat = `<section class="p-sec"><h3>Alignement stratégique</h3>${duo(alPE, alSD)}</section>`;
   const acts = c.actions.filter(a => has(a.libelle));
-  const actTab = acts.length ? `<section class="p-sec"><h3>Plan d'action</h3><table class="p-tab">
+  const actTab = `<section class="p-sec"><h3>Plan d'action</h3><table class="p-tab">
       <thead><tr><th style="width:50%">Action</th><th>Porteur</th><th>Début</th><th>Échéance</th></tr></thead><tbody>
       ${acts.map(a => `<tr class="a"><td>${esc(a.libelle)}${a.commentaire ? `<div style="font-weight:normal;font-size:8.5pt;color:#3E4854">${esc(a.commentaire)}</div>` : ''}</td><td>${esc(pers(a.porteur, a.porteurNom))}</td><td>${fr(a.debut)}</td><td>${fr(a.echeance)}</td></tr>
         ${a.taches.filter(t => has(t.libelle)).map(t => `<tr class="t"><td>${esc(t.libelle)}</td><td>${esc(pers(t.porteur, t.porteurNom))}</td><td>${fr(t.debut)}</td><td>${fr(t.echeance)}</td></tr>`).join('')}`).join('')}
-      </tbody></table></section>` : '';
+      ${acts.length ? '' : vides(4, 4)}
+      </tbody></table></section>`;
   const insts = c.instances.filter(x => x.date || x.instance || x.type);
-  const instTab = insts.length ? `<section class="p-sec"><h3>Passages en instance</h3><table class="p-tab">
+  const instTab = `<section class="p-sec"><h3>Passages en instance</h3><table class="p-tab">
       <thead><tr><th>Date</th><th>Type</th><th>Instance</th><th>Rattachée à</th><th>Rapporteur</th><th style="width:30%">Commentaire</th></tr></thead><tbody>
       ${insts.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).map(x => `<tr><td>${fr(x.date)}</td><td>${esc(x.type)}</td><td>${esc(x.instance)}</td><td>${esc(ratt(x.cible))}</td><td>${esc(pers(x.rapporteur, x.rapporteurNom))}</td><td>${esc(x.commentaire)}</td></tr>`).join('')}
-      </tbody></table></section>` : '';
+      ${insts.length ? '' : vides(2, 6)}
+      </tbody></table></section>`;
   const jours = c.journal.filter(x => has(x.commentaire));
-  const jourTab = jours.length ? `<section class="p-sec"><h3>Journal de bord</h3><table class="p-tab">
+  const jourTab = `<section class="p-sec"><h3>Journal de bord</h3><table class="p-tab">
       <thead><tr><th>Date</th><th>Nature / origine</th><th>Collaborateur</th><th>Rattachée à</th><th style="width:40%">Commentaire</th></tr></thead><tbody>
       ${jours.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).map(x => `<tr><td>${fr(x.date)}</td><td>${esc(x.nature)}</td><td>${esc(pers(x.collaborateur, x.collaborateurNom))}</td><td>${esc(ratt(x.cible))}</td><td>${esc(x.commentaire)}</td></tr>`).join('')}
-      </tbody></table></section>` : '';
+      ${jours.length ? '' : vides(3, 5)}
+      </tbody></table></section>`;
   return `
     <div class="p-content">
       <div class="p-head">
         <div class="p-org"><b>SDIS de l'Ain</b>Service départemental d'incendie et de secours</div>
         <div class="p-doc"><b>Fiche projet</b>Statut : ${esc(st)}</div>
       </div>
-      <h1 class="p-title">${esc(f.Titre || 'Sans titre')}</h1>
+      <h1 class="p-title">${esc(f.Titre) || '&nbsp;'}</h1>
       <div class="p-tags">
         <span class="p-tag">${esc(st)}</span>
       </div>
       <div class="p-meta">${meta.map(([k, v]) => `<div><span>${k}</span><b>${esc(v) || '&nbsp;'}</b></div>`).join('')}</div>
-      ${txt('Contexte et problème constaté', f.Contexte)}
-      ${txt('Objectifs', f.Descriptif)}
+      ${txt('Contexte et problème constaté', f.Contexte, 4)}
+      ${txt('Objectifs', f.Descriptif, 4)}
       ${duo(txt('Bénéfices attendus', f.Benefices), txt('Si le projet n\'est pas lancé', f.Sans_Projet))}
       ${duo(txt('Inclus dans le périmètre', f.Perimetre), txt('Hors périmètre', f.Hors_Perimetre))}
       ${pp}
