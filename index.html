@@ -121,6 +121,9 @@ details.al-g[open]>summary .t::before{content:"▾"}
 .al-body{padding:0 12px 12px}
 .al-sous{font-size:12px;color:var(--gris);font-weight:bold;margin:8px 0 5px}
 .al-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:6px}
+.fld input.libre{border-style:dashed;border-color:var(--ambre);background:var(--ambre-pale)}
+.rep-info{font-size:12px;color:var(--gris);align-self:end;padding-bottom:7px}
+.rep-info.ko{color:var(--ambre);font-weight:bold}
 .ro{padding:6px 8px;border:1px dashed var(--trait);border-radius:4px;min-height:31px;color:var(--gris)}
 .titre input{font-size:16px;font-weight:bold}
 
@@ -233,6 +236,7 @@ details.al-g[open]>summary .t::before{content:"▾"}
   </aside>
   <main id="main"></main>
 </div>
+<datalist id="dl-collab"></datalist>
 <div id="print"></div>
 <div id="toast" aria-live="polite"></div>
 <div id="modal" role="dialog" aria-modal="true"><div class="mbox"><h3 id="m-t"></h3><div class="mbody" id="m-b"></div><div class="btns"><button class="btn" id="m-no">Annuler</button><button class="btn primary" id="m-ok">OK</button></div></div></div>
@@ -269,6 +273,9 @@ function pick(table, obj){ const c = COLS[table]; if (!c) return obj; const o = 
 async function apply(actions){ const r = await grist.docApi.applyUserActions(actions); return r.retValues; }
 async function fetchSafe(t){ try { return rows(await grist.docApi.fetchTable(t)); } catch(e){ console.warn('Table illisible : ' + t, e); return []; } }
 const collabName = id => (S.collabById[id] || {}).Nom_Prenom || '';
+const nomPath = p => p === 'Porteur' ? 'Porteur_Saisi' : p + 'Nom';
+const pers = (id, nom) => collabName(id) || nom || '';
+const findCollab = nom => { const n = String(nom || '').trim().toLowerCase(); return n ? S.collab.find(c => c.Nom_Prenom.toLowerCase() === n) : null; };
 const grpOf = id => { const c = S.collabById[id]; return c ? (S.grpById[c.Groupement] || '') : ''; };
 
 function toast(msg, type){ const d = document.createElement('div'); d.className = 'toast ' + (type || ''); d.textContent = msg; $('#toast').appendChild(d); setTimeout(() => d.remove(), type === 'err' ? 7000 : 3000); }
@@ -295,13 +302,13 @@ async function loadMeta(){
     });
   } catch(e){ console.warn('Métadonnées indisponibles', e); }
   if (!CH[T.FICHES + '.Statut_Fiche']) CH[T.FICHES + '.Statut_Fiche'] = STATUTS;
-  CH.PRIO = CH[T.MEO + '.Priorite'] || [];
 }
 async function loadRefs(){
   const [c, g, pe, sd, ape, asd] = await Promise.all([fetchSafe(T.COLLAB), fetchSafe(T.GRPT), fetchSafe(T.PE), fetchSafe(T.SDACR), fetchSafe('Avancement_PE'), fetchSafe('Avancement_SDACR')]);
   S.grpById = {}; g.forEach(r => S.grpById[r.id] = r.Groupement || r.Libelle_Groupement || '');
   S.collab = c.filter(r => r.Nom_Prenom).sort((a, b) => a.Nom_Prenom.localeCompare(b.Nom_Prenom, 'fr'));
   S.collabById = {}; S.collab.forEach(r => S.collabById[r.id] = r);
+  const dl = document.getElementById('dl-collab'); if (dl) dl.innerHTML = S.collab.map(c => `<option value="${esc(c.Nom_Prenom)}"></option>`).join('');
   const lab = r => ({ id:r.id, label:[r.ID_Sous_Objectif, r.Resultat_Attendu].filter(Boolean).join(' : ') });
   const cmp = (a, b) => String(a).localeCompare(String(b), 'fr', { numeric:true });
   const build = (recap, av) => {
@@ -323,7 +330,7 @@ async function reloadList(){
 function parseContenu(s){
   let o = {}; try { o = JSON.parse(s || '{}') || {}; } catch(e){}
   return {
-    actions: (o.actions || []).map(a => ({ uid:a.uid || uid(), libelle:'', porteur:0, debut:'', echeance:'', priorite:'', commentaire:'', ...a, taches:(a.taches || []).map(t => ({ uid:t.uid || uid(), libelle:'', porteur:0, debut:'', echeance:'', ...t })) })),
+    actions: (o.actions || []).map(a => ({ uid:a.uid || uid(), libelle:'', porteur:0, debut:'', echeance:'', commentaire:'', ...a, taches:(a.taches || []).map(t => ({ uid:t.uid || uid(), libelle:'', porteur:0, debut:'', echeance:'', ...t })) })),
     instances: (o.instances || []).map(x => ({ uid:x.uid || uid(), cible:'projet', ...x })),
     journal: (o.journal || []).map(x => ({ uid:x.uid || uid(), cible:'projet', ...x }))
   };
@@ -332,11 +339,11 @@ function fromRow(r){
   const t = k => r[k] || '';
   const n = k => (r[k] ?? '');
   return {
-    id:r.id, Titre:t('Titre'), Porteur:r.Porteur || 0,
+    id:r.id, Titre:t('Titre'), Porteur:r.Porteur || 0, Porteur_Saisi:t('Porteur_Saisi'),
     Contexte:t('Contexte'), Descriptif:t('Descriptif'), Benefices:t('Benefices'), Sans_Projet:t('Sans_Projet'),
     Perimetre:t('Perimetre'), Hors_Perimetre:t('Hors_Perimetre'), Parties_Prenantes:t('Parties_Prenantes'), Groupements_Impactes:L(r.Groupements_Impactes),
     Date_Debut_Souhaitee:iso(r.Date_Debut_Souhaitee), Echeance:iso(r.Echeance),
-    Budget_Investissement:(r.Budget_Investissement ?? r.Budget_Estime ?? ''), Budget_Fonctionnement:n('Budget_Fonctionnement'),
+    Budget_Global:(r.Budget_Global ?? ''), Budget_Investissement:(r.Budget_Investissement ?? r.Budget_Estime ?? ''), Budget_Fonctionnement:n('Budget_Fonctionnement'),
     Ressources:t('Ressources'),
     Risques:t('Risques'), Contraintes:t('Contraintes'), Indicateurs:t('Indicateurs'),
     Statut_Fiche:r.Statut_Fiche || 'Brouillon', Date_Decision:iso(r.Date_Decision), Avis_Direction:t('Avis_Direction'),
@@ -345,14 +352,20 @@ function fromRow(r){
   };
 }
 function newFiche(){ return fromRow({ id:null }); }
+function normBudget(f){
+  if ((f.Budget_Global === '' || f.Budget_Global == null) && (f.Budget_Investissement !== '' || f.Budget_Fonctionnement !== ''))
+    f.Budget_Global = (Number(f.Budget_Investissement) || 0) + (Number(f.Budget_Fonctionnement) || 0);
+  f._repartir = (f.Budget_Investissement !== '' && f.Budget_Investissement != null) || (f.Budget_Fonctionnement !== '' && f.Budget_Fonctionnement != null);
+  return f;
+}
 const num = v => (v === '' || v == null || isNaN(Number(v))) ? null : Number(v);
 function toFields(f){
   return pick(T.FICHES, {
-    Titre:f.Titre.trim(), Porteur:f.Porteur || 0,
+    Titre:f.Titre.trim(), Porteur:f.Porteur || 0, Porteur_Saisi:f.Porteur ? '' : (f.Porteur_Saisi || ''),
     Contexte:f.Contexte, Descriptif:f.Descriptif, Benefices:f.Benefices, Sans_Projet:f.Sans_Projet,
     Perimetre:f.Perimetre, Hors_Perimetre:f.Hors_Perimetre, Parties_Prenantes:f.Parties_Prenantes, Groupements_Impactes:toList(f.Groupements_Impactes),
     Date_Debut_Souhaitee:sec(f.Date_Debut_Souhaitee), Echeance:sec(f.Echeance),
-    Budget_Investissement:num(f.Budget_Investissement), Budget_Fonctionnement:num(f.Budget_Fonctionnement),
+    Budget_Global:num(f.Budget_Global), Budget_Investissement:num(f.Budget_Investissement), Budget_Fonctionnement:num(f.Budget_Fonctionnement),
     Ressources:f.Ressources,
     Risques:f.Risques, Contraintes:f.Contraintes, Indicateurs:f.Indicateurs,
     Statut_Fiche:f.Statut_Fiche, Date_Decision:sec(f.Date_Decision), Avis_Direction:f.Avis_Direction,
@@ -373,12 +386,12 @@ function renderList(){
   const q = S.q.trim().toLowerCase();
   const list = S.fiches
     .filter(r => !S.fs || statutOf(r) === S.fs)
-    .filter(r => !q || (String(r.Titre || '') + ' ' + collabName(r.Porteur)).toLowerCase().includes(q))
+    .filter(r => !q || (String(r.Titre || '') + ' ' + pers(r.Porteur, r.Porteur_Saisi)).toLowerCase().includes(q))
     .sort((a, b) => (b.id || 0) - (a.id || 0));
   $('#list').innerHTML = list.map(r => `
     <button class="item ${S.cur && S.cur.id === r.id ? 'sel' : ''}" data-open="${r.id}">
       <b>${esc(r.Titre || 'Sans titre')}</b>
-      <small><span>${esc(collabName(r.Porteur) || 'Porteur non renseigné')}</span>${pill(statutOf(r))}</small>
+      <small><span>${esc(pers(r.Porteur, r.Porteur_Saisi) || 'Porteur non renseigné')}</span>${pill(statutOf(r))}</small>
     </button>`).join('') || `<p class="vide" style="padding:8px">Aucune fiche.</p>`;
 }
 
@@ -388,8 +401,24 @@ const fld = (label, inner, cls = '', aide = '') => `<label class="fld ${cls}"><s
 const inp = (p, v, type = 'text', extra = '') => `<input type="${type}" data-p="${p}" value="${esc(v)}" ${extra} ${D()}>`;
 const ta = (p, v, r = 3) => `<textarea data-p="${p}" rows="${r}" ${D()}>${esc(v)}</textarea>`;
 function selCollab(p, v){
-  return `<select data-p="${p}" data-t="n" ${D()}><option value=""></option>${S.collab.map(c => `<option value="${c.id}" ${c.id === v ? 'selected' : ''}>${esc(c.Nom_Prenom)}</option>`).join('')}</select>`;
+  const saisi = getPath(S.cur, nomPath(p)) || '';
+  const libre = !v && saisi;
+  return `<input type="text" list="dl-collab" data-p="${p}" data-collab value="${esc(collabName(v) || saisi)}" placeholder="Choisir ou saisir un nom" autocomplete="off" class="${libre ? 'libre' : ''}" title="${libre ? 'Nom saisi manuellement : absent de la table Collaborateur' : ''}" ${D()}>`;
 }
+function getPath(obj, path){ return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj); }
+function resolveCollab(el){
+  const path = el.dataset.p, name = el.value.trim().replace(/\s+/g, ' ');
+  const found = findCollab(name);
+  const id = found ? found.id : 0, nom = found ? '' : name;
+  if ((getPath(S.cur, path) || 0) !== id || (getPath(S.cur, nomPath(path)) || '') !== nom){
+    setPath(S.cur, path, id); setPath(S.cur, nomPath(path), nom); markDirty();
+  }
+  el.value = found ? found.Nom_Prenom : name;
+  el.classList.toggle('libre', !!nom);
+  el.title = nom ? 'Nom saisi manuellement : absent de la table Collaborateur' : '';
+  afterCollab(path, id);
+}
+function afterCollab(path, id){ if (path === 'Porteur' && $('#grp')) $('#grp').textContent = grpOf(id) || (S.cur.Porteur_Saisi ? 'Non déterminé (nom saisi manuellement)' : 'Déduit du porteur'); }
 function selChoice(p, v, choices){
   choices = choices || [];
   if (!choices.length) return inp(p, v);
@@ -494,9 +523,8 @@ function renderForm(){
     <div class="act">
       <div class="act-head"><b>Action ${i + 1}</b>${lk ? '' : `<button class="lnk danger" data-act="delAction" data-i="${i}">Retirer l'action</button>`}</div>
       <div class="grid g4">
-        ${fld('Intitulé de l\'action', inp(`contenu.actions.${i}.libelle`, a.libelle), 'span2')}
+        ${fld('Intitulé de l\'action', inp(`contenu.actions.${i}.libelle`, a.libelle), 'span3')}
         ${fld('Porteur', selCollab(`contenu.actions.${i}.porteur`, a.porteur))}
-        ${fld('Priorité', selChoice(`contenu.actions.${i}.priorite`, a.priorite, CH.PRIO))}
         ${fld('Début', inp(`contenu.actions.${i}.debut`, a.debut, 'date'))}
         ${fld('Échéance', inp(`contenu.actions.${i}.echeance`, a.echeance, 'date'))}
         ${fld('Livrable ou commentaire', ta(`contenu.actions.${i}.commentaire`, a.commentaire, 2), 'span2')}
@@ -536,7 +564,7 @@ function renderForm(){
   <section class="sec"><h3>Identification</h3><div class="sec-body grid g2">
     ${fld('Titre du projet', inp('Titre', f.Titre, 'text', 'placeholder="Intitulé du projet"'), 'full titre')}
     ${fld('Porteur', selCollab('Porteur', f.Porteur))}
-    <div class="fld"><span>Groupement</span><div class="ro" id="grp">${esc(grpOf(f.Porteur)) || 'Déduit du porteur'}</div></div>
+    <div class="fld"><span>Groupement</span><div class="ro" id="grp">${esc(grpOf(f.Porteur)) || (f.Porteur_Saisi ? 'Non déterminé (nom saisi manuellement)' : 'Déduit du porteur')}</div></div>
   </div></section>
 
   <section class="sec"><h3>Pourquoi ce projet</h3><div class="sec-body grid g2">
@@ -564,13 +592,17 @@ function renderForm(){
   </div></section>
 
   <section class="sec"><h3>Moyens</h3><div class="sec-body grid g2">
-    ${fld('Investissement (€)', inp('Budget_Investissement', f.Budget_Investissement, 'number', 'min="0" step="100"'))}
-    ${fld('Fonctionnement annuel (€ / an)', inp('Budget_Fonctionnement', f.Budget_Fonctionnement, 'number', 'min="0" step="100"'), '', 'Licences, maintenance, abonnements.')}
+    ${fld('Budget global (€)', inp('Budget_Global', f.Budget_Global, 'number', 'min="0" step="100"'))}
+    <div class="fld" style="justify-content:flex-end">${lk ? '' : `<button class="lnk" data-act="repartir" style="text-align:left">${f._repartir ? 'Ne plus répartir le budget' : 'Répartir entre investissement et fonctionnement'}</button>`}</div>
+    ${f._repartir ? `
+    ${fld('dont investissement (€)', inp('Budget_Investissement', f.Budget_Investissement, 'number', 'min="0" step="100"'))}
+    ${fld('dont fonctionnement (€)', inp('Budget_Fonctionnement', f.Budget_Fonctionnement, 'number', 'min="0" step="100"'), '', 'Licences, maintenance, abonnements.')}
+    <div class="rep-info full ${repInfo(f).ko ? 'ko' : ''}" id="rep-info">${repInfo(f).txt}</div>` : ''}
     ${fld('Ressources humaines', ta('Ressources', f.Ressources, 3), 'full', 'Répartition de la charge par groupement, compétences nécessaires, appui externe.')}
   </div></section>
 
   <section class="sec"><h3>Risques et contraintes</h3><div class="sec-body grid g2">
-    ${fld('Risques et solutions', ta('Risques', f.Risques, 4), '', 'Pour chaque risque, la solution prévue.')}
+    ${fld('Risques et solutions', ta('Risques', f.Risques, 4), '', 'Pour chaque risque, la solution est-elle prévue ?')}
     ${fld('Contraintes', ta('Contraintes', f.Contraintes, 4), '', 'Réglementaire, RGPD, marché public, sécurité SI, calendrier imposé.')}
   </div></section>
 
@@ -602,6 +634,14 @@ function renderForm(){
   </div></section>`;
 }
 function renderAll(){ renderList(); renderMain(); }
+function repInfo(f){
+  const g = Number(f.Budget_Global) || 0, i = Number(f.Budget_Investissement) || 0, fo = Number(f.Budget_Fonctionnement) || 0, r = g - i - fo;
+  if (!g) return { ko:false, txt:'Renseigne le budget global pour vérifier la répartition.' };
+  if (r > 0) return { ko:false, txt:'Reste à répartir : ' + money(r) };
+  if (r < 0) return { ko:true, txt:'La répartition dépasse le budget global de ' + money(-r) };
+  return { ko:false, txt:'Budget entièrement réparti.' };
+}
+function updateRep(){ const el = $('#rep-info'); if (!el || !S.cur) return; const r = repInfo(S.cur); el.textContent = r.txt; el.classList.toggle('ko', r.ko); }
 function markDirty(){ if (!S.dirty){ S.dirty = true; renderBar(); } }
 
 /* ===================== Événements ===================== */
@@ -614,11 +654,12 @@ document.addEventListener('input', e => {
     el.parentElement.querySelectorAll('.chk-it').forEach(it => it.style.display = it.textContent.toLowerCase().includes(q) ? '' : 'none');
     return;
   }
+  if (el.hasAttribute('data-collab')) return;
   if (el.dataset.p && S.cur){
     let v = el.value;
     if (el.dataset.t === 'n') v = v ? Number(v) : 0;
     setPath(S.cur, el.dataset.p, v);
-    if (el.dataset.p === 'Porteur') $('#grp').textContent = grpOf(v) || 'Déduit du porteur';
+    if (/^Budget_/.test(el.dataset.p)) updateRep();
     markDirty();
   }
 });
@@ -632,6 +673,7 @@ document.addEventListener('change', e => {
     const cnt = document.querySelector(`[data-count="${key}"]`); if (cnt) cnt.textContent = arr.length + ' sélectionné(s)';
     markDirty(); return;
   }
+  if (el.hasAttribute('data-collab') && S.cur){ resolveCollab(el); return; }
   if (!el.dataset.p || !S.cur) return;
   if (/^contenu\.actions\.\d+\.libelle$/.test(el.dataset.p)) renderForm();
   if (el.dataset.p === 'Statut_Fiche' || el.dataset.p === 'Titre'){
@@ -645,7 +687,7 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
   const a = b.dataset.act, i = Number(b.dataset.i), j = Number(b.dataset.j), c = S.cur && S.cur.contenu;
   switch (a){
-    case 'new': if (await confirmLeave()){ S.cur = newFiche(); S.dirty = false; S.histo = []; renderAll(); } break;
+    case 'new': if (await confirmLeave()){ S.cur = normBudget(newFiche()); S.dirty = false; S.histo = []; renderAll(); } break;
     case 'save': save(); break;
     case 'print': doPrint(); break;
     case 'alTab': S.alTab = b.dataset.k; renderAlign(); break;
@@ -658,7 +700,11 @@ document.addEventListener('click', async e => {
     }
     case 'create': createProject(); break;
     case 'move': moveStatut(b.dataset.s); break;
-    case 'addAction': c.actions.push({ uid:uid(), libelle:'', porteur:0, debut:'', echeance:'', priorite:'', commentaire:'', taches:[] }); S.dirty = true; renderMain(); break;
+    case 'repartir':
+      if (S.cur._repartir){ S.cur.Budget_Investissement = ''; S.cur.Budget_Fonctionnement = ''; S.cur._repartir = false; }
+      else S.cur._repartir = true;
+      S.dirty = true; renderMain(); break;
+    case 'addAction': c.actions.push({ uid:uid(), libelle:'', porteur:0, debut:'', echeance:'', commentaire:'', taches:[] }); S.dirty = true; renderMain(); break;
     case 'delAction': {
       const gone = c.actions[i].uid; c.actions.splice(i, 1);
       c.instances.concat(c.journal).forEach(x => { if (x.cible === gone) x.cible = 'projet'; });
@@ -680,7 +726,7 @@ async function openFiche(id){
   if (S.cur && S.cur.id === id) return;
   if (!(await confirmLeave())) return;
   const r = S.fiches.find(x => x.id === id); if (!r) return;
-  S.cur = fromRow(r); S.dirty = false; await loadHisto(); renderAll();
+  S.cur = normBudget(fromRow(r)); S.dirty = false; await loadHisto(); renderAll();
   try { grist.setCursorPos({ rowId:id }); } catch(e){}
 }
 
@@ -765,13 +811,22 @@ async function createProject(){
   });
   if (pb.length){ await modal('Création impossible', `<ul>${pb.map(x => `<li>${x}</li>`).join('')}</ul>`, 'Compris', false); return; }
 
+  // Noms saisis manuellement : nouvelle tentative de rapprochement, sinon notés en commentaire
+  const ref = (id, nom) => id || (findCollab(nom) || {}).id || 0;
+  const libres = new Set();
+  const note = (id, nom) => (!ref(id, nom) && nom) ? (libres.add(nom), nom) : '';
+  note(f.Porteur, f.Porteur_Saisi);
+  acts.forEach(a => { note(a.porteur, a.porteurNom); a.taches.forEach(t => note(t.porteur, t.porteurNom)); });
+  insts.forEach(x => note(x.rapporteur, x.rapporteurNom)); jours.forEach(x => note(x.collaborateur, x.collaborateurNom));
+  const avert = libres.size ? `<p style="background:var(--ambre-pale);padding:8px 10px;border-radius:4px;margin:10px 0 0">Absents de la table Collaborateur : <b>${[...libres].map(esc).join(', ')}</b>. Le champ porteur restera vide et le nom sera noté en commentaire.</p>` : '';
+  const withNote = (txt, label, id, nom) => { const n = note(id, nom); return n ? ((txt ? txt + '\n' : '') + label + ' : ' + n) : (txt || ''); };
   const ok = await modal('Créer le projet',
     `<div style="margin-bottom:10px">Nature du projet :
        <label style="margin-left:10px"><input type="radio" name="nat" value="PEPS"> PEPS</label>
        <label style="margin-left:14px"><input type="radio" name="nat" value="AV"> AV</label></div>
      Le projet <b>${esc(titre)}</b> sera créé avec :
      <ul><li>${acts.length} action(s)</li><li>${nbT} tâche(s)</li><li>${insts.length} passage(s) en instance</li><li>${jours.length} entrée(s) de journal de bord</li></ul>
-     Les lignes sans intitulé ne sont pas reprises. La fiche passera ensuite en lecture seule.`, 'Créer le projet');
+     Les lignes sans intitulé ne sont pas reprises. La fiche passera ensuite en lecture seule.${avert}`, 'Créer le projet');
   if (!ok) return;
   const natEl = document.querySelector('input[name="nat"]:checked');
   if (!natEl){ toast('Choisis la nature du projet : PEPS ou AV.', 'err'); return; }
@@ -791,33 +846,33 @@ async function createProject(){
     const pId = await add(T.PEPS, { ID_Projet_Action_AV:titre });
     // 2. Ligne projet (PEPS / AV) dans Liste_Action_MEO
     const lineId = await add(T.MEO, {
-      ID_Projet_Action_AV:pId, ID_Action_MEO:titre, Nature:nat, Porteur:f.Porteur || 0,
+      ID_Projet_Action_AV:pId, ID_Action_MEO:titre, Nature:nat, Porteur:ref(f.Porteur, f.Porteur_Saisi), Commentaire:withNote('', 'Porteur pressenti', f.Porteur, f.Porteur_Saisi),
       Date_Debut:sec(f.Date_Debut_Souhaitee), Ech_Prev:sec(f.Echeance),
       Descriptif_Initiative:f.Descriptif || '', ID_Projet_Etablissement_23_28:toList(f.Lien_PE),
       ID_SDACR_25_30:toList(f.Lien_SDACR)
     });
     // 3. Actions MEO
     const actIds = await addMany(T.MEO, acts.map(a => ({
-      ID_Projet_Action_AV:pId, ID_Action_MEO:a.libelle.trim(), Nature:'MEO', Porteur:a.porteur || 0,
-      Priorite:a.priorite || '', Date_Debut:sec(a.debut), Ech_Prev:sec(a.echeance), Commentaire:a.commentaire || ''
+      ID_Projet_Action_AV:pId, ID_Action_MEO:a.libelle.trim(), Nature:'MEO', Porteur:ref(a.porteur, a.porteurNom),
+      Date_Debut:sec(a.debut), Ech_Prev:sec(a.echeance), Commentaire:withNote(a.commentaire, 'Porteur pressenti', a.porteur, a.porteurNom)
     })));
     const map = { projet:lineId }; acts.forEach((a, k) => map[a.uid] = actIds[k]);
     // 4. Tâches
     const taches = [];
     acts.forEach(a => a.taches.filter(t => (t.libelle || '').trim()).forEach(t => taches.push({
-      ID_Tache:t.libelle.trim(), ID_Action_MEO:map[a.uid], Porteur:t.porteur || 0,
-      Date_Debut:sec(t.debut), Ech_Prev:sec(t.echeance), Avancement:0
+      ID_Tache:t.libelle.trim(), ID_Action_MEO:map[a.uid], Porteur:ref(t.porteur, t.porteurNom),
+      Date_Debut:sec(t.debut), Ech_Prev:sec(t.echeance), Avancement:0, Commentaire:withNote('', 'Porteur pressenti', t.porteur, t.porteurNom)
     })));
     await addMany(T.TACHE, taches);
     // 5. Instances
     await addMany(T.INST, insts.map(x => ({
-      Date:sec(x.date), Type:x.type || '', Instance:x.instance || '', Commentaire:x.commentaire || '',
-      Rapporteur:x.rapporteur || 0, ID_Action_MEO:map[x.cible] || lineId
+      Date:sec(x.date), Type:x.type || '', Instance:x.instance || '', Commentaire:withNote(x.commentaire, 'Rapporteur', x.rapporteur, x.rapporteurNom),
+      Rapporteur:ref(x.rapporteur, x.rapporteurNom), ID_Action_MEO:map[x.cible] || lineId
     })));
     // 6. Journal de bord
     await addMany(T.JOUR, jours.map(x => ({
-      Date:sec(x.date), Nature_Origine:x.nature || '', Commentaire:x.commentaire || '',
-      Collaborateur:x.collaborateur || 0, ID_PEPS_AV_MEO:map[x.cible] || lineId
+      Date:sec(x.date), Nature_Origine:x.nature || '', Commentaire:withNote(x.commentaire, 'Collaborateur', x.collaborateur, x.collaborateurNom),
+      Collaborateur:ref(x.collaborateur, x.collaborateurNom), ID_PEPS_AV_MEO:map[x.cible] || lineId
     })));
     // 7. Lien fiche -> projet
     await apply([['UpdateRecord', T.FICHES, f.id, pick(T.FICHES, { Projet_Cree:pId })]]);
@@ -841,15 +896,15 @@ function prioCls(p){ p = String(p || ''); return p.startsWith('P1') ? 'color:#B5
 function buildPrint(){
   const f = S.cur, c = f.contenu;
   const st = f.Projet_Cree ? 'Projet créé' : f.Statut_Fiche;
-  const wm = (f.Projet_Cree || f.Statut_Fiche === 'Validée') ? '' : (f.Statut_Fiche || 'Brouillon').toUpperCase();
   const ratt = v => { if (v === 'projet' || !v) return 'Projet'; const a = c.actions.find(x => x.uid === v); return a ? (a.libelle || 'Action') : 'Projet'; };
   const has = v => v && String(v).trim();
   const txt = (t, v) => has(v) ? `<section class="p-sec"><h3>${t}</h3><p class="p-txt">${esc(v)}</p></section>` : '';
   const duo = (a, b) => (a && b) ? `<div class="p-2col">${a}${b}</div>` : (a || b);
   const nb = v => (v === '' || v == null) ? '' : new Intl.NumberFormat('fr-FR').format(Number(v));
+  const rep = [f.Budget_Investissement !== '' && f.Budget_Investissement != null ? 'Invest. ' + money(f.Budget_Investissement) : '', f.Budget_Fonctionnement !== '' && f.Budget_Fonctionnement != null ? 'Fonct. ' + money(f.Budget_Fonctionnement) : ''].filter(Boolean).join(' / ');
   const meta = [
-    ['Porteur', collabName(f.Porteur)], ['Groupement', grpOf(f.Porteur)], ['Début souhaité', fr(f.Date_Debut_Souhaitee)],
-    ['Échéance', fr(f.Echeance)], ['Investissement', money(f.Budget_Investissement)], ['Fonctionnement / an', money(f.Budget_Fonctionnement)]
+    ['Porteur', pers(f.Porteur, f.Porteur_Saisi)], ['Groupement', grpOf(f.Porteur)], ['Début souhaité', fr(f.Date_Debut_Souhaitee)],
+    ['Échéance', fr(f.Echeance)], ['Budget global', money(f.Budget_Global)], ['Répartition', rep]
   ];
   const grps = S.grps.filter(x => f.Groupements_Impactes.includes(x.id)).map(x => x.label);
   const pp = (has(f.Parties_Prenantes) || grps.length) ? `<section class="p-sec"><h3>Parties prenantes</h3>
@@ -864,22 +919,21 @@ function buildPrint(){
   const strat = (alPE || alSD) ? `<section class="p-sec"><h3>Alignement stratégique</h3>${duo(alPE, alSD)}</section>` : '';
   const acts = c.actions.filter(a => has(a.libelle));
   const actTab = acts.length ? `<section class="p-sec"><h3>Plan d'action</h3><table class="p-tab">
-      <thead><tr><th style="width:44%">Action</th><th>Porteur</th><th>Début</th><th>Échéance</th><th>Priorité</th></tr></thead><tbody>
-      ${acts.map(a => `<tr class="a"><td>${esc(a.libelle)}${a.commentaire ? `<div style="font-weight:normal;font-size:8.5pt;color:#3E4854">${esc(a.commentaire)}</div>` : ''}</td><td>${esc(collabName(a.porteur))}</td><td>${fr(a.debut)}</td><td>${fr(a.echeance)}</td><td>${esc(a.priorite)}</td></tr>
-        ${a.taches.filter(t => has(t.libelle)).map(t => `<tr class="t"><td>${esc(t.libelle)}</td><td>${esc(collabName(t.porteur))}</td><td>${fr(t.debut)}</td><td>${fr(t.echeance)}</td><td></td></tr>`).join('')}`).join('')}
+      <thead><tr><th style="width:50%">Action</th><th>Porteur</th><th>Début</th><th>Échéance</th></tr></thead><tbody>
+      ${acts.map(a => `<tr class="a"><td>${esc(a.libelle)}${a.commentaire ? `<div style="font-weight:normal;font-size:8.5pt;color:#3E4854">${esc(a.commentaire)}</div>` : ''}</td><td>${esc(pers(a.porteur, a.porteurNom))}</td><td>${fr(a.debut)}</td><td>${fr(a.echeance)}</td></tr>
+        ${a.taches.filter(t => has(t.libelle)).map(t => `<tr class="t"><td>${esc(t.libelle)}</td><td>${esc(pers(t.porteur, t.porteurNom))}</td><td>${fr(t.debut)}</td><td>${fr(t.echeance)}</td></tr>`).join('')}`).join('')}
       </tbody></table></section>` : '';
   const insts = c.instances.filter(x => x.date || x.instance || x.type);
   const instTab = insts.length ? `<section class="p-sec"><h3>Passages en instance</h3><table class="p-tab">
       <thead><tr><th>Date</th><th>Type</th><th>Instance</th><th>Rattachée à</th><th>Rapporteur</th><th style="width:30%">Commentaire</th></tr></thead><tbody>
-      ${insts.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).map(x => `<tr><td>${fr(x.date)}</td><td>${esc(x.type)}</td><td>${esc(x.instance)}</td><td>${esc(ratt(x.cible))}</td><td>${esc(collabName(x.rapporteur))}</td><td>${esc(x.commentaire)}</td></tr>`).join('')}
+      ${insts.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).map(x => `<tr><td>${fr(x.date)}</td><td>${esc(x.type)}</td><td>${esc(x.instance)}</td><td>${esc(ratt(x.cible))}</td><td>${esc(pers(x.rapporteur, x.rapporteurNom))}</td><td>${esc(x.commentaire)}</td></tr>`).join('')}
       </tbody></table></section>` : '';
   const jours = c.journal.filter(x => has(x.commentaire));
   const jourTab = jours.length ? `<section class="p-sec"><h3>Journal de bord</h3><table class="p-tab">
       <thead><tr><th>Date</th><th>Nature / origine</th><th>Collaborateur</th><th>Rattachée à</th><th style="width:40%">Commentaire</th></tr></thead><tbody>
-      ${jours.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).map(x => `<tr><td>${fr(x.date)}</td><td>${esc(x.nature)}</td><td>${esc(collabName(x.collaborateur))}</td><td>${esc(ratt(x.cible))}</td><td>${esc(x.commentaire)}</td></tr>`).join('')}
+      ${jours.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).map(x => `<tr><td>${fr(x.date)}</td><td>${esc(x.nature)}</td><td>${esc(pers(x.collaborateur, x.collaborateurNom))}</td><td>${esc(ratt(x.cible))}</td><td>${esc(x.commentaire)}</td></tr>`).join('')}
       </tbody></table></section>` : '';
   return `
-    ${wm ? `<div class="p-wm">${esc(wm)}</div>` : ''}
     <div class="p-content">
       <div class="p-head">
         <div class="p-org"><b>SDIS de l'Ain</b>Service départemental d'incendie et de secours</div>
@@ -904,9 +958,6 @@ function buildPrint(){
         <div class="p-dec-g"><div>Statut : <b>${esc(f.Statut_Fiche)}</b></div><div>Date de décision : <b>${fr(f.Date_Decision) || '..... / ..... / ..........'}</b></div></div>
         <div>Avis :</div><p class="p-txt" style="min-height:14mm">${esc(f.Avis_Direction)}</p>
         <div class="p-visas"><div class="p-visa">Visa du porteur</div><div class="p-visa">Visa de la direction</div></div>
-        ${S.histo.length ? `<table class="p-histo"><thead><tr><th>Date</th><th>Évolution</th><th>Par</th><th>Commentaire</th></tr></thead><tbody>
-          ${S.histo.slice().reverse().map(h => `<tr><td>${dt(h.Date)}</td><td>${h.Ancien_Statut ? esc(h.Ancien_Statut) + ' → ' : ''}${esc(h.Nouveau_Statut)}</td><td>${esc(h.Auteur)}</td><td>${esc(h.Commentaire)}</td></tr>`).join('')}
-        </tbody></table>` : ''}
       </div></section>
     </div>`;
 }
