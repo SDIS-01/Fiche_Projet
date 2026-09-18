@@ -172,6 +172,54 @@ details.al-g[open]>summary .t::before{content:"▾"}
   .row-t,.row-i,.row-j{grid-template-columns:1fr 1fr}
   .row-i .fld.com,.row-j .fld.com{grid-column:1/-1}
 }
+/* ---------- Mobile ---------- */
+.back{display:none}
+@media (max-width:700px){
+  #app{display:block;height:auto;min-height:100vh}
+  body.m-list main{display:none}
+  body.m-fiche aside{display:none}
+  aside{max-height:none;min-height:100vh;border-right:0}
+  .list{overflow:visible;padding:4px 8px 20px}
+  .item{padding:12px}
+  .chips{flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px}
+  .chip{white-space:nowrap;padding:5px 11px}
+  .bar{position:static;padding:10px 12px 0}
+  .bar-top{flex-direction:column;gap:6px}
+  .bar h2{font-size:16px}
+  .back{display:inline-block;border:0;background:none;color:var(--bleu);font-weight:bold;padding:4px 0 8px;cursor:pointer}
+  .bar .btns{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--blanc);border-top:1px solid var(--trait);padding:8px 10px calc(8px + env(safe-area-inset-bottom));flex-wrap:nowrap;box-shadow:0 -2px 8px rgba(30,39,51,.08)}
+  .bar .btns .btn{flex:1;padding:10px 4px;font-size:13px}
+  .lg{display:none}
+  .flow .sep{display:none}
+  .flow .btn{flex:1 1 45%;padding:10px 8px}
+  .form{padding:12px 10px 90px}
+  .g2,.g3,.g4{grid-template-columns:1fr}
+  .span2,.span3,.full{grid-column:1/-1}
+  .sec>h3,.sec-body{padding-left:12px;padding-right:12px}
+  .act{padding:10px}
+  .taches{padding:8px}
+  .row-t,.row-i,.row-j{grid-template-columns:1fr 1fr;padding:10px 0}
+  .row-t>.fld:first-child{grid-column:1/-1}
+  .row-t .x,.row-i .x,.row-j .x{justify-self:end}
+  .row-i .fld.com,.row-j .fld.com{grid-column:1/-1}
+  .fld input,.fld select,.fld textarea,.search,.al-tools input{font-size:16px;padding:8px}
+  .x{width:40px;height:40px}
+  .lnk{padding:8px 0}
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .al-cards{grid-template-columns:1fr}
+  .al-card{padding-top:10px;padding-bottom:10px}
+  .al-tabs{flex-wrap:nowrap;overflow-x:auto}
+  .al-tabs button{white-space:nowrap;padding:8px 10px}
+  .al-tools{flex-direction:column;align-items:stretch;gap:4px}
+  .al-chip span{max-width:230px}
+  .histo-wrap{overflow-x:auto}
+  .histo{min-width:520px}
+  #toast{left:10px;right:10px;bottom:76px}
+  .toast{max-width:none}
+  #modal{align-items:flex-end;padding:0}
+  .mbox{border-radius:10px 10px 0 0;max-height:90vh;overflow:auto;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+  .mbox .btns .btn{flex:1;padding:11px 6px}
+}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
 /* ---------- Impression ---------- */
@@ -475,6 +523,7 @@ function renderAlign(){
 /* ===================== Rendu : écran principal ===================== */
 function renderMain(){
   const m = $('#main');
+  document.body.classList.toggle('m-fiche', !!S.cur); document.body.classList.toggle('m-list', !S.cur);
   if (!S.cur){
     m.innerHTML = `<div class="empty"><h2>Aucune fiche ouverte</h2><p>Choisis une fiche dans la liste, ou crée une nouvelle fiche projet en brouillon.</p><button class="btn primary" data-act="new">Nouvelle fiche</button></div>`;
     return;
@@ -499,11 +548,11 @@ function renderBar(){
   const moves = lk ? [] : (FLOW[st] || FLOW['Brouillon']);
   $('#bar').innerHTML = `
     <div class="bar-top">
-      <div><h2>${esc(f.Titre || 'Nouvelle fiche')}</h2>
+      <div><button class="back" data-act="back">‹ Toutes les fiches</button><h2>${esc(f.Titre || 'Nouvelle fiche')}</h2>
         <div class="sub">${f.id ? (f.Cree_Par ? `Créée par ${esc(f.Cree_Par)}${f.Cree_Le ? ' le ' + fr(f.Cree_Le) : ''}` : 'Fiche enregistrée') : 'Pas encore enregistrée'}${S.dirty ? ' <b class="dirty">Modifications non enregistrées</b>' : ''}</div>
       </div>
       <div class="btns">
-        <button class="btn" data-act="cancel" ${S.dirty && !lk ? '' : 'disabled'}>Annuler les modifications</button>
+        <button class="btn" data-act="cancel" ${S.dirty && !lk ? '' : 'disabled'}>Annuler<span class="lg"> les modifications</span></button>
         <button class="btn" data-act="print">Imprimer</button>
         <button class="btn" data-act="save" ${lk ? 'disabled' : ''}>Enregistrer</button>
       </div>
@@ -629,9 +678,9 @@ function renderForm(){
   </div></section>
 
   <section class="sec"><h3>Historique de la fiche <span class="n">${S.histo.length}</span></h3><div class="sec-body">
-    ${S.histo.length ? `<table class="histo"><thead><tr><th>Date</th><th>Évolution</th><th>Par</th><th>Commentaire</th></tr></thead><tbody>
+    ${S.histo.length ? `<div class="histo-wrap"><table class="histo"><thead><tr><th>Date</th><th>Évolution</th><th>Par</th><th>Commentaire</th></tr></thead><tbody>
       ${S.histo.map(h => `<tr><td class="fl">${dt(h.Date)}</td><td class="fl">${h.Ancien_Statut ? esc(h.Ancien_Statut) + ' → ' : ''}<b>${esc(h.Nouveau_Statut)}</b></td><td>${esc(h.Auteur)}</td><td>${esc(h.Commentaire)}</td></tr>`).join('')}
-    </tbody></table>` : '<p class="vide">L\'historique commence au premier enregistrement de la fiche.</p>'}
+    </tbody></table></div>` : '<p class="vide">L\'historique commence au premier enregistrement de la fiche.</p>'}
   </div></section>`;
 }
 function renderAll(){ renderList(); renderMain(); }
@@ -704,6 +753,7 @@ document.addEventListener('click', async e => {
     case 'create': createProject(); break;
     case 'move': moveStatut(b.dataset.s); break;
     case 'cancel': cancelEdits(); break;
+    case 'back': if (await confirmLeave()){ S.cur = null; S.dirty = false; S.histo = []; renderAll(); window.scrollTo(0, 0); } break;
     case 'repartir':
       if (S.cur._repartir){ S.cur.Budget_Investissement = ''; S.cur.Budget_Fonctionnement = ''; S.cur._repartir = false; }
       else S.cur._repartir = true;
@@ -730,7 +780,7 @@ async function openFiche(id){
   if (S.cur && S.cur.id === id) return;
   if (!(await confirmLeave())) return;
   const r = S.fiches.find(x => x.id === id); if (!r) return;
-  S.cur = normBudget(fromRow(r)); S.dirty = false; await loadHisto(); renderAll();
+  S.cur = normBudget(fromRow(r)); S.dirty = false; await loadHisto(); renderAll(); window.scrollTo(0, 0);
   try { grist.setCursorPos({ rowId:id }); } catch(e){}
 }
 
