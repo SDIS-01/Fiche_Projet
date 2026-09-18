@@ -318,7 +318,20 @@ function iso(v){ if (v == null || v === '') return ''; if (typeof v === 'string'
 function sec(s){ if (!s) return null; const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d) / 1000; }
 function fr(s){ if (!s) return ''; const [y, m, d] = s.split('-'); return `${d}/${m}/${y}`; }
 function dt(v){ if (v == null || v === '') return ''; const d = typeof v === 'number' ? new Date(v * 1000) : new Date(v); if (isNaN(d)) return ''; const p = n => String(n).padStart(2, '0'); return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`; }
-function money(v){ if (v === '' || v == null || isNaN(Number(v))) return ''; return new Intl.NumberFormat('fr-FR', {style:'currency', currency:'EUR', maximumFractionDigits:0}).format(Number(v)); }
+const isNum = v => v !== '' && v != null && !isNaN(Number(v));
+const fmtNum = v => isNum(v) ? new Intl.NumberFormat('fr-FR', { maximumFractionDigits:0 }).format(Number(v)).replace(/[\u202F\u00A0]/g, ' ') : '';
+const fmtMoney = v => isNum(v) ? fmtNum(v) + ' €' : '';
+const parseMoney = t => { const d = String(t || '').replace(/[^0-9]/g, ''); return d ? Number(d) : ''; };
+function moneyInp(p, v){ return `<input type="text" inputmode="numeric" data-p="${p}" data-money value="${esc(fmtMoney(v))}" placeholder="0 €" ${D()}>`; }
+function setMoneyField(p, v){ S.cur[p] = v; const el = document.querySelector(`[data-p="${p}"]`); if (el && el !== document.activeElement) el.value = fmtMoney(v); }
+function repartirAuto(src){
+  const f = S.cur; if (!f._repartir) return;
+  const g = f.Budget_Global;
+  if (!isNum(g)) return;
+  if (src === 'Budget_Fonctionnement'){ if (isNum(f.Budget_Fonctionnement)) setMoneyField('Budget_Investissement', Math.max(g - f.Budget_Fonctionnement, 0)); }
+  else if (isNum(f.Budget_Investissement)) setMoneyField('Budget_Fonctionnement', Math.max(g - f.Budget_Investissement, 0));
+}
+function money(v){ if (v === '' || v == null || isNaN(Number(v))) return ''; return fmtMoney(v); }
 function pick(table, obj){ const c = COLS[table]; if (!c) return obj; const o = {}; for (const k in obj) if (c.has(k)) o[k] = obj[k]; return o; }
 async function apply(actions){ const r = await grist.docApi.applyUserActions(actions); return r.retValues; }
 async function fetchSafe(t){ try { return rows(await grist.docApi.fetchTable(t)); } catch(e){ console.warn('Table illisible : ' + t, e); return []; } }
@@ -644,11 +657,11 @@ function renderForm(){
   </div></section>
 
   <section class="sec"><h3>Moyens</h3><div class="sec-body grid g2">
-    ${fld('Budget global (€)', inp('Budget_Global', f.Budget_Global, 'number', 'min="0" step="100"'))}
+    ${fld('Budget global', moneyInp('Budget_Global', f.Budget_Global))}
     <div class="fld" style="justify-content:flex-end">${lk ? '' : `<button class="lnk" data-act="repartir" style="text-align:left">${f._repartir ? 'Ne plus répartir le budget' : 'Répartir entre investissement et fonctionnement'}</button>`}</div>
     ${f._repartir ? `
-    ${fld('dont investissement (€)', inp('Budget_Investissement', f.Budget_Investissement, 'number', 'min="0" step="100"'))}
-    ${fld('dont fonctionnement (€)', inp('Budget_Fonctionnement', f.Budget_Fonctionnement, 'number', 'min="0" step="100"'), '', 'Licences, maintenance, abonnements.')}
+    ${fld('dont investissement', moneyInp('Budget_Investissement', f.Budget_Investissement), '', 'Le fonctionnement se calcule automatiquement.')}
+    ${fld('dont fonctionnement', moneyInp('Budget_Fonctionnement', f.Budget_Fonctionnement), '', 'Licences, maintenance, abonnements. Modifiable : l\'investissement s\'ajuste alors.')}
     <div class="rep-info full ${repInfo(f).ko ? 'ko' : ''}" id="rep-info">${repInfo(f).txt}</div>` : ''}
     ${fld('Ressources humaines', ta('Ressources', f.Ressources, 3), 'full', 'Répartition de la charge par groupement, compétences nécessaires, appui externe.')}
   </div></section>
@@ -707,6 +720,12 @@ document.addEventListener('input', e => {
     return;
   }
   if (el.hasAttribute('data-collab')) return;
+  if (el.hasAttribute('data-money') && S.cur){
+    const v = parseMoney(el.value);
+    el.value = v === '' ? '' : fmtNum(v);
+    S.cur[el.dataset.p] = v;
+    repartirAuto(el.dataset.p); updateRep(); markDirty(); return;
+  }
   if (el.dataset.p && S.cur){
     let v = el.value;
     if (el.dataset.t === 'n') v = v ? Number(v) : 0;
@@ -715,6 +734,8 @@ document.addEventListener('input', e => {
     markDirty();
   }
 });
+document.addEventListener('focusin', e => { const el = e.target; if (el.hasAttribute && el.hasAttribute('data-money') && S.cur) el.value = fmtNum(S.cur[el.dataset.p]); });
+document.addEventListener('focusout', e => { const el = e.target; if (el.hasAttribute && el.hasAttribute('data-money') && S.cur) el.value = fmtMoney(S.cur[el.dataset.p]); });
 document.addEventListener('change', e => {
   const el = e.target;
   if (el.dataset.m && S.cur){
