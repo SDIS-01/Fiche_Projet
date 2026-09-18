@@ -503,6 +503,7 @@ function renderBar(){
         <div class="sub">${f.id ? (f.Cree_Par ? `Créée par ${esc(f.Cree_Par)}${f.Cree_Le ? ' le ' + fr(f.Cree_Le) : ''}` : 'Fiche enregistrée') : 'Pas encore enregistrée'}${S.dirty ? ' <b class="dirty">Modifications non enregistrées</b>' : ''}</div>
       </div>
       <div class="btns">
+        <button class="btn" data-act="cancel" ${S.dirty && !lk ? '' : 'disabled'}>Annuler les modifications</button>
         <button class="btn" data-act="print">Imprimer</button>
         <button class="btn" data-act="save" ${lk ? 'disabled' : ''}>Enregistrer</button>
       </div>
@@ -675,11 +676,13 @@ document.addEventListener('change', e => {
   }
   if (el.hasAttribute('data-collab') && S.cur){ resolveCollab(el); return; }
   if (!el.dataset.p || !S.cur) return;
-  if (/^contenu\.actions\.\d+\.libelle$/.test(el.dataset.p)) renderForm();
-  if (el.dataset.p === 'Statut_Fiche' || el.dataset.p === 'Titre'){
-    if ((S.cur.Statut_Fiche === 'Validée' || S.cur.Statut_Fiche === 'Refusée') && !S.cur.Date_Decision){ S.cur.Date_Decision = today(); renderForm(); }
-    renderBar();
+  // Mises à jour ciblées : pas de re-rendu complet, pour ne pas perdre le clic en cours
+  const m = el.dataset.p.match(/^contenu\.actions\.(\d+)\.libelle$/);
+  if (m){
+    const i = Number(m[1]), a = S.cur.contenu.actions[i];
+    document.querySelectorAll('select[data-p$=".cible"] option[value="' + a.uid + '"]').forEach(o => o.textContent = a.libelle || 'Action ' + (i + 1));
   }
+  if (el.dataset.p === 'Titre'){ const h = $('#bar h2'); if (h) h.textContent = S.cur.Titre || 'Nouvelle fiche'; }
 });
 document.addEventListener('click', async e => {
   const chip = e.target.closest('[data-fs]'); if (chip){ S.fs = chip.dataset.fs; renderChips(); renderList(); return; }
@@ -700,6 +703,7 @@ document.addEventListener('click', async e => {
     }
     case 'create': createProject(); break;
     case 'move': moveStatut(b.dataset.s); break;
+    case 'cancel': cancelEdits(); break;
     case 'repartir':
       if (S.cur._repartir){ S.cur.Budget_Investissement = ''; S.cur.Budget_Fonctionnement = ''; S.cur._repartir = false; }
       else S.cur._repartir = true;
@@ -747,6 +751,21 @@ async function save(silent){
     return true;
   } catch(e){ toast('Enregistrement impossible : ' + e.message, 'err'); return false; }
   finally { S.busy = false; }
+}
+
+async function cancelEdits(){
+  if (!S.cur || !S.dirty || S.busy) return;
+  const nouvelle = !S.cur.id;
+  const ok = await modal('Annuler les modifications',
+    nouvelle ? 'Cette fiche n\'a jamais été enregistrée : elle sera abandonnée.' : 'La fiche reviendra à son dernier enregistrement.',
+    'Annuler les modifications');
+  if (!ok) return;
+  if (nouvelle){ S.cur = null; S.dirty = false; S.histo = []; renderAll(); return; }
+  try { await reloadList(); } catch(e){}
+  const r = S.fiches.find(x => x.id === S.cur.id);
+  S.cur = r ? normBudget(fromRow(r)) : null; S.dirty = false;
+  await loadHisto(); renderAll();
+  toast('Modifications annulées.');
 }
 
 /* ===================== Statut et historique ===================== */
