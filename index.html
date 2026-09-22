@@ -243,6 +243,8 @@ details.al-g[open]>summary .t::before{content:"▾"}
 .p-meta{display:grid;grid-template-columns:repeat(3,1fr);border:.6pt solid #C9CFD6;margin-bottom:5mm}
 .p-meta div{padding:1.8mm 2.5mm;border-right:.6pt solid #C9CFD6;border-bottom:.6pt solid #C9CFD6}
 .p-meta div:nth-child(3n){border-right:0}
+.p-meta div:last-child:nth-child(3n+1){grid-column:span 3;border-right:0}
+.p-meta div:last-child:nth-child(3n+2){grid-column:span 2;border-right:0}
 .p-2col{display:grid;grid-template-columns:1fr 1fr;gap:5mm}
 .p-grp{margin:1.5mm 0 0;font-size:9pt}
 .p-al-ref{font-weight:bold;margin:0 0 1mm}
@@ -301,7 +303,7 @@ const T = {
 const STATUTS = ['Brouillon','Soumise','Validée','Refusée'];
 
 /* ===================== État ===================== */
-const S = { fiches:[], cur:null, dirty:false, collab:[], collabById:{}, grpById:{}, align:{ Lien_PE:[], Lien_SDACR:[] }, alTab:'Lien_PE', alQ:'', alOpen:new Set(), grps:[], histo:[], q:'', fs:'', busy:false, ready:false };
+const S = { fiches:[], cur:null, dirty:false, collab:[], collabById:{}, grpById:{}, sdirByGrp:{}, sdirMeta:null, align:{ Lien_PE:[], Lien_SDACR:[] }, alTab:'Lien_PE', alQ:'', alOpen:new Set(), grps:[], histo:[], q:'', fs:'', busy:false, ready:false };
 const CH = {};    // choix des colonnes : "Table.Colonne" -> [...]
 const COLS = {};  // colonnes existantes : "Table" -> Set
 
@@ -340,6 +342,9 @@ const nomPath = p => p === 'Porteur' ? 'Porteur_Saisi' : p + 'Nom';
 const pers = (id, nom) => collabName(id) || nom || '';
 const findCollab = nom => { const n = String(nom || '').trim().toLowerCase(); return n ? S.collab.find(c => c.Nom_Prenom.toLowerCase() === n) : null; };
 const grpOf = id => { const c = S.collabById[id]; return c ? (S.grpById[c.Groupement] || '') : ''; };
+/* Sous-direction : lue dans la colonne Sous_direction de la table Groupement */
+const sdirOf = id => { const c = S.collabById[id]; return c ? (S.sdirByGrp[c.Groupement] || '') : ''; };
+const sdirTxt = f => sdirOf(f.Porteur) || (f.Porteur_Saisi ? 'Non déterminée (nom saisi manuellement)' : 'Déduite du porteur');
 
 function toast(msg, type){ const d = document.createElement('div'); d.className = 'toast ' + (type || ''); d.textContent = msg; $('#toast').appendChild(d); setTimeout(() => d.remove(), type === 'err' ? 7000 : 3000); }
 function modal(title, html, okLabel, cancel = true){
@@ -358,7 +363,10 @@ async function loadMeta(){
     const tabs = rows(await grist.docApi.fetchTable('_grist_Tables'));
     const cols = rows(await grist.docApi.fetchTable('_grist_Tables_column'));
     const byId = {}; tabs.forEach(t => byId[t.id] = t.tableId);
+    const colById = {}; cols.forEach(c => colById[c.id] = c.colId);
     cols.forEach(c => {
+      if (byId[c.parentId] === T.GRPT && c.colId === 'Sous_direction')
+        S.sdirMeta = { type:c.type || '', display:colById[c.visibleCol] || '' };
       const tb = byId[c.parentId]; if (!tb) return;
       (COLS[tb] = COLS[tb] || new Set()).add(c.colId);
       try { const o = JSON.parse(c.widgetOptions || '{}'); if (Array.isArray(o.choices)) CH[tb + '.' + c.colId] = o.choices; } catch(e){}
@@ -369,6 +377,7 @@ async function loadMeta(){
 async function loadRefs(){
   const [c, g, pe, sd, ape, asd] = await Promise.all([fetchSafe(T.COLLAB), fetchSafe(T.GRPT), fetchSafe(T.PE), fetchSafe(T.SDACR), fetchSafe('Avancement_PE'), fetchSafe('Avancement_SDACR')]);
   S.grpById = {}; g.forEach(r => S.grpById[r.id] = r.Groupement || r.Libelle_Groupement || '');
+  await loadSdir(g);
   S.collab = c.filter(r => r.Nom_Prenom).sort((a, b) => a.Nom_Prenom.localeCompare(b.Nom_Prenom, 'fr'));
   S.collabById = {}; S.collab.forEach(r => S.collabById[r.id] = r);
   const dl = document.getElementById('dl-collab'); if (dl) dl.innerHTML = S.collab.map(c => `<option value="${esc(c.Nom_Prenom)}"></option>`).join('');
@@ -383,6 +392,21 @@ async function loadRefs(){
   S.align.Lien_PE = build(pe, ape);
   S.align.Lien_SDACR = build(sd, asd);
   S.grps = g.filter(r => r.Groupement).map(r => ({ id:r.id, code:r.Groupement, lib:r.Libelle_Groupement || '', label:r.Groupement + (r.Libelle_Groupement ? ' : ' + r.Libelle_Groupement : '') })).sort((a, b) => a.code.localeCompare(b.code, 'fr'));
+}
+async function loadSdir(g){
+  S.sdirByGrp = {};
+  const m = S.sdirMeta || { type:'', display:'' };
+  let lib = null;                                   // colonne de type Référence : libellés de la table visée
+  if (m.type.startsWith('Ref:') && m.display){
+    lib = {}; (await fetchSafe(m.type.slice(4))).forEach(r => lib[r.id] = r[m.display]);
+  }
+  const txt = v => {
+    if (v == null || v === '') return '';
+    if (Array.isArray(v)) return v[0] === 'L' ? v.slice(1).map(txt).filter(Boolean).join(', ') : '';
+    if (lib && typeof v === 'number') return String(lib[v] ?? '');
+    return String(v);
+  };
+  g.forEach(r => S.sdirByGrp[r.id] = txt(r.Sous_direction));
 }
 async function reloadList(){
   S.fiches = rows(await grist.docApi.fetchTable(T.FICHES));
@@ -481,7 +505,11 @@ function resolveCollab(el){
   el.title = nom ? 'Nom saisi manuellement : absent de la table Collaborateur' : '';
   afterCollab(path, id);
 }
-function afterCollab(path, id){ if (path === 'Porteur' && $('#grp')) $('#grp').textContent = grpOf(id) || (S.cur.Porteur_Saisi ? 'Non déterminé (nom saisi manuellement)' : 'Déduit du porteur'); }
+function afterCollab(path, id){
+  if (path !== 'Porteur') return;
+  if ($('#grp')) $('#grp').textContent = grpOf(id) || (S.cur.Porteur_Saisi ? 'Non déterminé (nom saisi manuellement)' : 'Déduit du porteur');
+  if ($('#sdir')) $('#sdir').textContent = sdirTxt(S.cur);
+}
 function selChoice(p, v, choices){
   choices = choices || [];
   if (!choices.length) return inp(p, v);
@@ -626,10 +654,11 @@ function renderForm(){
     </div>`).join('');
 
   $('#form').innerHTML = `
-  <section class="sec"><h3>Identification</h3><div class="sec-body grid g2">
+  <section class="sec"><h3>Identification</h3><div class="sec-body grid g3">
     ${fld('Titre du projet', inp('Titre', f.Titre, 'text', 'placeholder="Intitulé du projet"'), 'full titre')}
     ${fld('Porteur', selCollab('Porteur', f.Porteur))}
     <div class="fld"><span>Groupement</span><div class="ro" id="grp">${esc(grpOf(f.Porteur)) || (f.Porteur_Saisi ? 'Non déterminé (nom saisi manuellement)' : 'Déduit du porteur')}</div></div>
+    <div class="fld"><span>Sous-direction</span><div class="ro" id="sdir">${esc(sdirTxt(f))}</div></div>
   </div></section>
 
   <section class="sec"><h3>Pourquoi ce projet</h3><div class="sec-body grid g2">
@@ -997,7 +1026,7 @@ function buildPrint(){
   const nb = v => (v === '' || v == null) ? '' : new Intl.NumberFormat('fr-FR').format(Number(v));
   const rep = [f.Budget_Investissement !== '' && f.Budget_Investissement != null ? 'Invest. ' + money(f.Budget_Investissement) : '', f.Budget_Fonctionnement !== '' && f.Budget_Fonctionnement != null ? 'Fonct. ' + money(f.Budget_Fonctionnement) : ''].filter(Boolean).join(' / ');
   const meta = [
-    ['Porteur', pers(f.Porteur, f.Porteur_Saisi)], ['Groupement', grpOf(f.Porteur)], ['Début souhaité', fr(f.Date_Debut_Souhaitee)],
+    ['Porteur', pers(f.Porteur, f.Porteur_Saisi)], ['Groupement', grpOf(f.Porteur)], ['Sous-direction', sdirOf(f.Porteur)], ['Début souhaité', fr(f.Date_Debut_Souhaitee)],
     ['Échéance', fr(f.Echeance)], ['Budget global', money(f.Budget_Global)], ['Répartition', rep]
   ];
   const grps = S.grps.filter(x => f.Groupements_Impactes.includes(x.id)).map(x => x.label);
