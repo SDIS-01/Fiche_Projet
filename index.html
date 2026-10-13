@@ -354,7 +354,7 @@ details.al-g[open]>summary .t::before{content:"▾"}
 const T = {
   FICHES:'Fiches_Projet', PEPS:'Liste_PEPS_AV', MEO:'Liste_Action_MEO', TACHE:'Liste_Tache',
   INST:'Instance', JOUR:'Journal_bord', COLLAB:'Collaborateur', GRPT:'Groupement', HISTO:'Historique_Fiche',
-  PE:'Recap_PE', SDACR:'Recap_SDACR'
+  PE:'Recap_PE_23_28', SDACR:'Recap_SDACR_25_30', APE:'Avancement_PE_23_28', ASDACR:'Avancement_SDACR_25_30'
 };
 const STATUTS = ['Brouillon','Soumise','Validée','Refusée'];
 const MAX_OBJ = 3;
@@ -459,7 +459,7 @@ async function loadMeta(){
   if (!CH[T.FICHES + '.Statut_Fiche']) CH[T.FICHES + '.Statut_Fiche'] = STATUTS;
 }
 async function loadRefs(){
-  const [c, g, pe, sd, ape, asd] = await Promise.all([fetchSafe(T.COLLAB), fetchSafe(T.GRPT), fetchSafe(T.PE), fetchSafe(T.SDACR), fetchSafe('Avancement_PE'), fetchSafe('Avancement_SDACR')]);
+  const [c, g, pe, sd, ape, asd] = await Promise.all([fetchSafe(T.COLLAB), fetchSafe(T.GRPT), fetchSafe(T.PE), fetchSafe(T.SDACR), fetchSafe(T.APE), fetchSafe(T.ASDACR)]);
   S.grpById = {}; g.forEach(r => S.grpById[r.id] = r.Groupement || r.Libelle_Groupement || '');
   await loadSdir(g);
   S.collab = c.filter(r => r.Nom_Prenom).sort((a, b) => a.Nom_Prenom.localeCompare(b.Nom_Prenom, 'fr'));
