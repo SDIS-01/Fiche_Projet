@@ -447,6 +447,7 @@ async function loadMeta(){
     const tabs = rows(await grist.docApi.fetchTable('_grist_Tables'));
     const cols = rows(await grist.docApi.fetchTable('_grist_Tables_column'));
     const byId = {}; tabs.forEach(t => byId[t.id] = t.tableId);
+    S.tables = tabs.map(t => t.tableId).filter(Boolean);
     const colById = {}; cols.forEach(c => colById[c.id] = c.colId);
     cols.forEach(c => {
       if (byId[c.parentId] === T.GRPT && c.colId === 'Sous_direction')
@@ -458,8 +459,21 @@ async function loadMeta(){
   } catch(e){ console.warn('Métadonnées indisponibles', e); }
   if (!CH[T.FICHES + '.Statut_Fiche']) CH[T.FICHES + '.Statut_Fiche'] = STATUTS;
 }
+const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+/* Identifiant réel d'une table : correspondance exacte, sinon sans tenir compte de la casse */
+function tableOf(name){
+  if (!S.tables || !S.tables.length) return name;
+  return S.tables.find(t => t === name) || S.tables.find(t => norm(t) === norm(name)) || '';
+}
+/* Identifiant réel d'une colonne : exacte, sinon sans casse, accents ni séparateurs */
+function colOf(table, name){
+  const c = COLS[table]; if (!c) return name;
+  if (c.has(name)) return name;
+  return [...c].find(x => norm(x) === norm(name)) || '';
+}
 async function loadRefs(){
-  const [c, g, pe, sd, ape, asd] = await Promise.all([fetchSafe(T.COLLAB), fetchSafe(T.GRPT), fetchSafe(T.PE), fetchSafe(T.SDACR), fetchSafe(T.APE), fetchSafe(T.ASDACR)]);
+  const tPE = tableOf(T.PE), tSD = tableOf(T.SDACR), tAPE = tableOf(T.APE), tASD = tableOf(T.ASDACR);
+  const [c, g, pe, sd, ape, asd] = await Promise.all([fetchSafe(T.COLLAB), fetchSafe(T.GRPT), fetchSafe(tPE), fetchSafe(tSD), fetchSafe(tAPE), fetchSafe(tASD)]);
   S.grpById = {}; g.forEach(r => S.grpById[r.id] = r.Groupement || r.Libelle_Groupement || '');
   await loadSdir(g);
   S.collab = c.filter(r => r.Nom_Prenom).sort((a, b) => a.Nom_Prenom.localeCompare(b.Nom_Prenom, 'fr'));
@@ -467,14 +481,25 @@ async function loadRefs(){
   const dl = document.getElementById('dl-collab'); if (dl) dl.innerHTML = S.collab.map(c => `<option value="${esc(c.Nom_Prenom)}"></option>`).join('');
   const lab = r => ({ id:r.id, label:[r.ID_Sous_Objectif, r.Resultat_Attendu].filter(Boolean).join(' : ') });
   const cmp = (a, b) => String(a).localeCompare(String(b), 'fr', { numeric:true });
-  const build = (recap, av) => {
-    const obj = {}; av.forEach(r => obj[r.id] = r.ID_Objectif || '');
-    return recap.map(r => ({ id:r.id, obj:obj[r.ID_Objectif] || 'Objectif non renseigné', sous:r.ID_Sous_Objectif || '', res:r.Resultat_Attendu || '' }))
+  // Tables et colonnes retrouvées sans tenir compte de la casse ni des espaces ; diagnostic si quelque chose manque
+  const build = (k, wanted, recap, tRecap, wantedAv, av, tAv) => {
+    const miss = [];
+    if (!tRecap) { S.alDiag[k] = `Table ${wanted} introuvable dans le document.`; return []; }
+    const cObj = colOf(tRecap, 'ID_Objectif'), cSous = colOf(tRecap, 'ID_Sous_Objectif'), cRes = colOf(tRecap, 'Resultat_Attendu');
+    if (!cSous) miss.push('ID_Sous_Objectif'); if (!cRes) miss.push('Resultat_Attendu');
+    if (miss.length){ S.alDiag[k] = `Colonne(s) introuvable(s) dans ${tRecap} : ${miss.join(', ')}.`; return []; }
+    if (!recap.length){ S.alDiag[k] = `La table ${tRecap} ne contient aucune ligne lisible.`; return []; }
+    const cAv = tAv ? colOf(tAv, 'ID_Objectif') : '';
+    const obj = {}; if (cAv) av.forEach(r => obj[r.id] = r[cAv] || '');
+    const txt = v => (v == null || typeof v === 'number' || Array.isArray(v)) ? '' : String(v);
+    S.alDiag[k] = '';
+    return recap.map(r => { const o = cObj ? r[cObj] : null; return { id:r.id, obj:(typeof o === 'number' ? obj[o] : txt(o)) || 'Objectif non renseigné', sous:txt(r[cSous]), res:txt(r[cRes]) }; })
       .filter(x => x.sous || x.res)
       .sort((a, b) => cmp(a.obj, b.obj) || cmp(a.sous, b.sous) || cmp(a.res, b.res));
   };
-  S.align.Lien_PE = build(pe, ape);
-  S.align.Lien_SDACR = build(sd, asd);
+  S.alDiag = {};
+  S.align.Lien_PE = build('Lien_PE', T.PE, pe, tPE, T.APE, ape, tAPE);
+  S.align.Lien_SDACR = build('Lien_SDACR', T.SDACR, sd, tSD, T.ASDACR, asd, tASD);
   S.grps = g.filter(r => r.Groupement).map(r => ({ id:r.id, code:r.Groupement, lib:r.Libelle_Groupement || '', label:r.Groupement + (r.Libelle_Groupement ? ' : ' + r.Libelle_Groupement : '') })).sort((a, b) => a.code.localeCompare(b.code, 'fr'));
 }
 async function loadSdir(g){
@@ -668,7 +693,7 @@ function renderAlign(){
   const match = i => !q || (i.obj + ' ' + i.sous + ' ' + i.res).toLowerCase().includes(q);
   const groups = [];
   items.filter(match).forEach(i => { let g = groups.find(x => x.obj === i.obj); if (!g) groups.push(g = { obj:i.obj, list:[] }); g.list.push(i); });
-  if (!items.length){ $('#al-groups').innerHTML = '<p class="vide">Aucun objectif disponible dans ce référentiel.</p>'; return; }
+  if (!items.length){ const dg = (S.alDiag || {})[k]; $('#al-groups').innerHTML = `<p class="vide">Aucun objectif disponible dans ce référentiel.</p>${dg ? `<p class="rep-info ko">${esc(dg)}</p>` : ''}`; return; }
   if (!groups.length){ $('#al-groups').innerHTML = '<p class="vide">Aucun objectif ne correspond à la recherche.</p>'; return; }
   $('#al-groups').innerHTML = groups.map(g => {
     const total = items.filter(i => i.obj === g.obj).length;
