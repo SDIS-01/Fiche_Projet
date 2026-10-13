@@ -341,6 +341,7 @@ details.al-g[open]>summary .t::before{content:"▾"}
       <div class="chips" id="chips"></div>
     </div>
     <div class="list" id="list"></div>
+    <div id="ver" style="padding:6px 14px;font-size:10.5px;color:var(--gris);border-top:1px solid var(--trait)"></div>
   </aside>
   <main id="main"></main>
 </div>
@@ -387,6 +388,8 @@ const AIDE = {
 const S = { fiches:[], cur:null, dirty:false, collab:[], collabById:{}, grpById:{}, sdirByGrp:{}, sdirMeta:null, align:{ Lien_PE:[], Lien_SDACR:[] }, alTab:'Lien_PE', alQ:'', alOpen:new Set(), grps:[], histo:[], q:'', fs:'', busy:false, ready:false };
 const CH = {};    // choix des colonnes : "Table.Colonne" -> [...]
 const COLS = {};  // colonnes existantes : "Table" -> Set
+const CMETA = {}; // "Table.Colonne" -> { type, display }
+const VERSION = '2026-10-13 c';
 
 /* ===================== Utilitaires ===================== */
 const $ = s => document.querySelector(s);
@@ -454,6 +457,7 @@ async function loadMeta(){
         S.sdirMeta = { type:c.type || '', display:colById[c.visibleCol] || '' };
       const tb = byId[c.parentId]; if (!tb) return;
       (COLS[tb] = COLS[tb] || new Set()).add(c.colId);
+      CMETA[tb + '.' + c.colId] = { type:c.type || '', display:colById[c.visibleCol] || '' };
       try { const o = JSON.parse(c.widgetOptions || '{}'); if (Array.isArray(o.choices)) CH[tb + '.' + c.colId] = o.choices; } catch(e){}
     });
   } catch(e){ console.warn('Métadonnées indisponibles', e); }
@@ -482,7 +486,20 @@ async function loadRefs(){
   const lab = r => ({ id:r.id, label:[r.ID_Sous_Objectif, r.Resultat_Attendu].filter(Boolean).join(' : ') });
   const cmp = (a, b) => String(a).localeCompare(String(b), 'fr', { numeric:true });
   // Tables et colonnes retrouvées sans tenir compte de la casse ni des espaces ; diagnostic si quelque chose manque
-  const build = (k, wanted, recap, tRecap, wantedAv, av, tAv) => {
+  // Libellés des colonnes de type référence (Ref / RefList) : table visée lue une fois
+  const refCache = {};
+  const refLabels = async (table, col) => {
+    const m = CMETA[table + '.' + col]; if (!m || !/^Ref(List)?:/.test(m.type) || !m.display) return null;
+    const target = m.type.split(':')[1], key = target + '.' + m.display;
+    if (!refCache[key]){ const map = {}; (await fetchSafe(target)).forEach(r => map[r.id] = r[m.display]); refCache[key] = map; }
+    return refCache[key];
+  };
+  const labelsFor = async (table, cols) => { const o = {}; for (const c of cols) if (c) o[c] = await refLabels(table, c); return o; };
+  const LBL = {
+    PE: await labelsFor(tPE, [colOf(tPE, 'ID_Objectif'), colOf(tPE, 'ID_Sous_Objectif'), colOf(tPE, 'Resultat_Attendu')]),
+    SD: await labelsFor(tSD, [colOf(tSD, 'ID_Objectif'), colOf(tSD, 'ID_Sous_Objectif'), colOf(tSD, 'Resultat_Attendu')])
+  };
+  const build = (k, wanted, recap, tRecap, wantedAv, av, tAv, lbl = {}) => {
     const miss = [];
     if (!tRecap) { S.alDiag[k] = `Table ${wanted} introuvable dans le document.`; return []; }
     const cObj = colOf(tRecap, 'ID_Objectif'), cSous = colOf(tRecap, 'ID_Sous_Objectif'), cRes = colOf(tRecap, 'Resultat_Attendu');
@@ -491,15 +508,23 @@ async function loadRefs(){
     if (!recap.length){ S.alDiag[k] = `La table ${tRecap} ne contient aucune ligne lisible.`; return []; }
     const cAv = tAv ? colOf(tAv, 'ID_Objectif') : '';
     const obj = {}; if (cAv) av.forEach(r => obj[r.id] = r[cAv] || '');
-    const txt = v => (v == null || typeof v === 'number' || Array.isArray(v)) ? '' : String(v);
-    S.alDiag[k] = '';
-    return recap.map(r => { const o = cObj ? r[cObj] : null; return { id:r.id, obj:(typeof o === 'number' ? obj[o] : txt(o)) || 'Objectif non renseigné', sous:txt(r[cSous]), res:txt(r[cRes]) }; })
+    // Valeur lisible : texte, référence (libellé de la ligne visée) ou liste
+    const txt = (v, c) => {
+      if (v == null || v === '') return '';
+      if (Array.isArray(v)) return v[0] === 'L' ? v.slice(1).map(x => txt(x, c)).filter(Boolean).join(', ') : '';
+      if (typeof v === 'number' && lbl[c]) return String(lbl[c][v] ?? '');
+      return typeof v === 'number' ? '' : String(v);
+    };
+    const out = recap.map(r => { const o = cObj ? r[cObj] : null; return { id:r.id, obj:(typeof o === 'number' && !lbl[cObj] ? obj[o] : txt(o, cObj)) || 'Objectif non renseigné', sous:txt(r[cSous], cSous), res:txt(r[cRes], cRes) }; })
       .filter(x => x.sous || x.res)
       .sort((a, b) => cmp(a.obj, b.obj) || cmp(a.sous, b.sous) || cmp(a.res, b.res));
+    const ex = recap[0] || {};
+    S.alDiag[k] = out.length ? '' : `La table ${tRecap} contient ${recap.length} ligne(s), mais ${cSous} et ${cRes} n'ont pas pu être lus (exemple de valeurs : ${JSON.stringify(ex[cSous])} / ${JSON.stringify(ex[cRes])}).`;
+    return out;
   };
   S.alDiag = {};
-  S.align.Lien_PE = build('Lien_PE', T.PE, pe, tPE, T.APE, ape, tAPE);
-  S.align.Lien_SDACR = build('Lien_SDACR', T.SDACR, sd, tSD, T.ASDACR, asd, tASD);
+  S.align.Lien_PE = build('Lien_PE', T.PE, pe, tPE, T.APE, ape, tAPE, LBL.PE);
+  S.align.Lien_SDACR = build('Lien_SDACR', T.SDACR, sd, tSD, T.ASDACR, asd, tASD, LBL.SD);
   S.grps = g.filter(r => r.Groupement).map(r => ({ id:r.id, code:r.Groupement, lib:r.Libelle_Groupement || '', label:r.Groupement + (r.Libelle_Groupement ? ' : ' + r.Libelle_Groupement : '') })).sort((a, b) => a.code.localeCompare(b.code, 'fr'));
 }
 async function loadSdir(g){
@@ -693,7 +718,7 @@ function renderAlign(){
   const match = i => !q || (i.obj + ' ' + i.sous + ' ' + i.res).toLowerCase().includes(q);
   const groups = [];
   items.filter(match).forEach(i => { let g = groups.find(x => x.obj === i.obj); if (!g) groups.push(g = { obj:i.obj, list:[] }); g.list.push(i); });
-  if (!items.length){ const dg = (S.alDiag || {})[k]; $('#al-groups').innerHTML = `<p class="vide">Aucun objectif disponible dans ce référentiel.</p>${dg ? `<p class="rep-info ko">${esc(dg)}</p>` : ''}`; return; }
+  if (!items.length){ const dg = (S.alDiag || {})[k] || 'Référentiel non chargé : recharge la page (Ctrl+F5).'; $('#al-groups').innerHTML = `<p class="vide">Aucun objectif disponible dans ce référentiel.</p>${dg ? `<p class="rep-info ko">${esc(dg)}</p>` : ''}`; return; }
   if (!groups.length){ $('#al-groups').innerHTML = '<p class="vide">Aucun objectif ne correspond à la recherche.</p>'; return; }
   $('#al-groups').innerHTML = groups.map(g => {
     const total = items.filter(i => i.obj === g.obj).length;
@@ -1469,6 +1494,7 @@ function doPrint(){
 /* ===================== Démarrage ===================== */
 document.getElementById('q').value = '';
 renderChips();
+document.getElementById('ver').textContent = 'Version ' + VERSION;
 grist.ready({ requiredAccess:'full' });
 (async () => {
   try {
