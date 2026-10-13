@@ -171,9 +171,7 @@ details.al-g[open]>summary .t::before{content:"▾"}
 .bud td.n input{text-align:right}
 .bud td input:disabled{background:var(--fond)}
 .bud tfoot th,.bud tfoot td{font-weight:bold;color:var(--encre);font-size:12.5px;border-top:2px solid var(--trait);border-bottom:0;padding-top:8px}
-.bud .xc{width:38px}
-.bud tr.verif td{color:var(--ambre);font-size:11.5px;font-weight:bold;padding-top:0}
-/* Frise chronologique */
+.bud .xc{width:38px}/* Frise chronologique */
 .frise{border:1px solid var(--trait);border-radius:5px;padding:6px 10px;background:var(--blanc);margin-top:12px;overflow:hidden}
 .fr-row{display:grid;grid-template-columns:180px minmax(0,1fr);align-items:center;border-bottom:1px solid var(--fond)}
 .fr-row:last-child{border-bottom:0}
@@ -375,7 +373,7 @@ const AIDE = {
   ppGt:'Membres du groupe de travail.',
   plan:'Actions et tâches : elles forment le plan d\'action présenté avec la fiche, et seront créées telles quelles à la validation.',
   frise:'Grandes dates du projet. Les actions datées du plan d\'action s\'y ajoutent automatiquement.',
-  budget:'Montants par section (investissement, fonctionnement). Ajoute des postes si besoin : la ligne Total donne le budget global.',
+  budget:'Budget global, réparti par section (investissement, fonctionnement) et, si besoin, par poste.',
   rhActuelles:'Agents et compétences déjà mobilisables, charge par groupement.',
   rhBesoins:'Renforts, compétences ou appui externe à trouver.',
   risques:'Pour chaque risque, la solution prévue.',
@@ -500,14 +498,6 @@ async function reloadList(){
 }
 
 /* ===================== Modèle de fiche ===================== */
-/* Budget : toujours un tableau de postes. Les anciennes fiches reprennent leur budget dans une première ligne. */
-function postesInit(list, r){
-  if (Array.isArray(list) && list.length) return list.map(x => ({ uid:x.uid || uid(), poste:'', inv:'', fonc:'', ...x }));
-  const n = v => isNum(v) ? Number(v) : '';
-  const inv = n(r.Budget_Investissement ?? r.Budget_Estime), fonc = n(r.Budget_Fonctionnement), g = n(r.Budget_Global);
-  if (inv === '' && fonc === '' && g !== '' && g !== 0) return [{ uid:uid(), poste:'Budget global', inv:g, fonc:'', verif:true }];
-  return [{ uid:uid(), poste:'Budget global', inv, fonc }];
-}
 function parseContenu(s, r = {}){
   let o = {}; try { o = JSON.parse(s || '{}') || {}; } catch(e){}
   // Les fiches enregistrées avant cette version reprennent leurs anciens textes
@@ -564,14 +554,18 @@ function flatten(f){
 }
 const totPostes = f => { let i = 0, fo = 0; f.contenu.postes.forEach(p => { i += Number(p.inv) || 0; fo += Number(p.fonc) || 0; }); return { i, fo, t:i + fo }; };
 function syncPostesData(f){
-  const P = f.contenu.postes, t = totPostes(f);
-  const anyI = P.some(p => isNum(p.inv)), anyF = P.some(p => isNum(p.fonc));
-  f.Budget_Investissement = anyI ? t.i : '';
-  f.Budget_Fonctionnement = anyF ? t.fo : '';
-  f.Budget_Global = (anyI || anyF) ? t.t : '';
+  if (!f.contenu.postesOn) return;
+  const t = totPostes(f);
+  f.Budget_Investissement = t.i; f.Budget_Fonctionnement = t.fo; f.Budget_Global = t.t; f._repartir = true;
 }
 function newFiche(){ return fromRow({ id:null }); }
-function normBudget(f){ syncPostesData(f); return f; }
+function normBudget(f){
+  if ((f.Budget_Global === '' || f.Budget_Global == null) && (f.Budget_Investissement !== '' || f.Budget_Fonctionnement !== ''))
+    f.Budget_Global = (Number(f.Budget_Investissement) || 0) + (Number(f.Budget_Fonctionnement) || 0);
+  f._repartir = (f.Budget_Investissement !== '' && f.Budget_Investissement != null) || (f.Budget_Fonctionnement !== '' && f.Budget_Fonctionnement != null);
+  syncPostesData(f);
+  return f;
+}
 const num = v => (v === '' || v == null || isNaN(Number(v))) ? null : Number(v);
 function toFields(f){
   flatten(f);
@@ -752,18 +746,20 @@ function postesHtml(f){
       <td class="n">${moneyInp(`contenu.postes.${i}.inv`, p.inv)}</td>
       <td class="n">${moneyInp(`contenu.postes.${i}.fonc`, p.fonc)}</td>
       <td class="n" id="pt-${i}">${fmtMoney((Number(p.inv) || 0) + (Number(p.fonc) || 0))}</td>
-      <td class="xc">${(lk || P.length < 2) ? '' : `<button class="x" title="Retirer le poste" aria-label="Retirer le poste" data-act="delPoste" data-i="${i}">×</button>`}</td>
-    </tr>${p.verif ? `<tr class="verif" id="pv-${i}"><td colspan="5">Montant repris de l'ancien budget global, sans répartition : vérifie s'il relève de l'investissement ou du fonctionnement.</td></tr>` : ''}`).join('')}</tbody>
+      <td class="xc">${lk ? '' : `<button class="x" title="Retirer le poste" aria-label="Retirer le poste" data-act="delPoste" data-i="${i}">×</button>`}</td>
+    </tr>`).join('') || '<tr><td colspan="5" class="vide">Aucun poste.</td></tr>'}</tbody>
     <tfoot><tr><th>Total</th><td class="n" id="pt-inv">${fmtMoney(t.i)}</td><td class="n" id="pt-fonc">${fmtMoney(t.fo)}</td><td class="n" id="pt-tot">${fmtMoney(t.t)}</td><td></td></tr></tfoot>
   </table></div>
   ${lk ? '' : '<button class="lnk" data-act="addPoste">Ajouter un poste</button>'}`;
 }
 function syncPostes(){
-  const f = S.cur; if (!f) return;
+  const f = S.cur; if (!f || !f.contenu.postesOn) return;
   syncPostesData(f);
+  ['Budget_Investissement', 'Budget_Fonctionnement', 'Budget_Global'].forEach(k => setMoneyField(k, f[k]));
   f.contenu.postes.forEach((p, i) => { const el = $('#pt-' + i); if (el) el.textContent = fmtMoney((Number(p.inv) || 0) + (Number(p.fonc) || 0)); });
   const t = totPostes(f);
   if ($('#pt-inv')){ $('#pt-inv').textContent = fmtMoney(t.i); $('#pt-fonc').textContent = fmtMoney(t.fo); $('#pt-tot').textContent = fmtMoney(t.t); }
+  updateRep();
 }
 
 /* ===================== Rendu : écran principal ===================== */
@@ -879,6 +875,7 @@ function renderForm(){
       ${fld('Solution', ta(`contenu.risques.${i}.solution`, x.solution, 2))}
       ${(lk || c.risques.length < 2) ? '<span></span>' : `<button class="x" title="Retirer le risque" aria-label="Retirer le risque" data-act="delRisque" data-i="${i}">×</button>`}
     </div>`).join('');
+  const pOn = c.postesOn;
 
   $('#form').innerHTML = `
   <section class="sec"><h3>Identification</h3><div class="sec-body grid g3">
@@ -933,7 +930,17 @@ function renderForm(){
   <section class="sec"><h3>Ressources nécessaires</h3><div class="sec-body">
     <div class="sub-h">Budget</div>
     <p class="aide" style="margin:0 0 10px">${AIDE.budget}</p>
-    ${postesHtml(f)}
+    <div class="grid g2">
+      ${fld('Budget global', moneyInp('Budget_Global', f.Budget_Global, pOn), '', pOn ? 'Calculé à partir du détail par poste.' : '')}
+      <div class="fld" style="justify-content:flex-end;align-items:flex-start">${lk ? '' : `
+        ${pOn ? '' : `<button class="lnk" data-act="repartir" style="text-align:left">${f._repartir ? 'Ne plus répartir le budget' : 'Répartir entre investissement et fonctionnement'}</button>`}
+        <button class="lnk" data-act="postes" style="text-align:left">${pOn ? 'Supprimer le détail par poste' : 'Détailler par poste'}</button>`}</div>
+      ${f._repartir ? `
+      ${fld('dont investissement', moneyInp('Budget_Investissement', f.Budget_Investissement, pOn), '', pOn ? 'Total de la colonne Investissement.' : 'Le fonctionnement se calcule automatiquement.')}
+      ${fld('dont fonctionnement', moneyInp('Budget_Fonctionnement', f.Budget_Fonctionnement, pOn), '', pOn ? 'Total de la colonne Fonctionnement.' : 'Licences, maintenance, abonnements. Modifiable : l\'investissement s\'ajuste alors.')}
+      ${pOn ? '' : `<div class="rep-info full ${repInfo(f).ko ? 'ko' : ''}" id="rep-info">${repInfo(f).txt}</div>`}` : ''}
+    </div>
+    ${pOn ? postesHtml(f) : ''}
     <div class="sub-h mt">Ressources humaines</div>
     <div class="grid g2">
       ${fld('Ressources actuelles', ta('contenu.rh.actuelles', c.rh.actuelles, 2), '', AIDE.rhActuelles)}
@@ -1006,11 +1013,7 @@ document.addEventListener('input', e => {
     const v = parseMoney(el.value), p = el.dataset.p;
     el.value = v === '' ? '' : fmtNum(v);
     setPath(S.cur, p, v);
-    if (p.startsWith('contenu.postes.')){
-      const k = Number(p.split('.')[2]), po = S.cur.contenu.postes[k];
-      if (po && po.verif){ delete po.verif; const v = $('#pv-' + k); if (v) v.remove(); }
-      syncPostes();
-    }
+    if (p.startsWith('contenu.postes.')) syncPostes();
     else { repartirAuto(p); updateRep(); }
     markDirty(); return;
   }
@@ -1092,7 +1095,25 @@ document.addEventListener('click', async e => {
     case 'addRisque': c.risques.push({ uid:uid(), risque:'', solution:'' }); S.dirty = true; renderMain(); break;
     case 'delRisque': c.risques.splice(i, 1); if (!c.risques.length) c.risques.push({ uid:uid(), risque:'', solution:'' }); S.dirty = true; renderMain(); break;
     case 'addPoste': c.postes.push({ uid:uid(), poste:'', inv:'', fonc:'' }); S.dirty = true; renderMain(); break;
-    case 'delPoste': c.postes.splice(i, 1); if (!c.postes.length) c.postes.push({ uid:uid(), poste:'Budget global', inv:'', fonc:'' }); syncPostesData(S.cur); S.dirty = true; renderMain(); break;
+    case 'delPoste': c.postes.splice(i, 1); syncPostesData(S.cur); S.dirty = true; renderMain(); break;
+    case 'postes': {
+      const f = S.cur;
+      if (c.postesOn){
+        const plein = c.postes.some(p => String(p.poste || '').trim() || isNum(p.inv) || isNum(p.fonc));
+        if (plein && !(await modal('Supprimer le détail par poste', 'Les postes saisis seront supprimés. Le budget global et sa répartition actuelle sont conservés et redeviennent modifiables.', 'Supprimer le détail'))) break;
+        c.postesOn = false; c.postes = [];
+      } else {
+        // Le montant déjà réparti est repris dans un premier poste, pour ne rien perdre
+        const inv = isNum(f.Budget_Investissement) ? Number(f.Budget_Investissement) : '';
+        const fonc = isNum(f.Budget_Fonctionnement) ? Number(f.Budget_Fonctionnement) : '';
+        const reste = isNum(f.Budget_Global) && inv === '' && fonc === '' ? Number(f.Budget_Global) : 0;
+        c.postesOn = true;
+        if (!c.postes.length) c.postes.push({ uid:uid(), poste:(inv !== '' || fonc !== '') ? 'À détailler' : '', inv, fonc });
+        syncPostesData(f);
+        if (reste) toast('Le budget global (' + fmtMoney(reste) + ') sera recalculé à partir des postes : répartis ce montant dans le tableau.');
+      }
+      S.dirty = true; renderMain(); break;
+    }
   }
 });
 async function confirmLeave(){
@@ -1340,16 +1361,16 @@ function buildPrint(){
   const frise = `<section class="p-sec">${h('Frise chronologique', AIDE.frise)}${friseData(f).dates.length ? friseHtml(f) : lignes(2)}</section>`;
 
   // Ressources nécessaires
-  const postes = c.postes.filter(p => isNum(p.inv) || isNum(p.fonc));
+  const postes = c.postesOn ? c.postes.filter(p => has(p.poste) || isNum(p.inv) || isNum(p.fonc)) : [];
   const tp = totPostes(f);
-  const posteTab = `<table class="p-tab">
-      <thead><tr><th>Poste</th><th class="n" style="width:20%">Investissement</th><th class="n" style="width:20%">Fonctionnement</th><th class="n" style="width:18%">Total</th></tr></thead><tbody>
+  const posteTab = postes.length ? `<table class="p-tab" style="margin-top:2mm">
+      <thead><tr><th>Poste</th><th class="n">Investissement</th><th class="n">Fonctionnement</th><th class="n">Total</th></tr></thead><tbody>
       ${postes.map(p => `<tr><td>${esc(p.poste)}</td><td class="n">${money(p.inv)}</td><td class="n">${money(p.fonc)}</td><td class="n">${money((Number(p.inv) || 0) + (Number(p.fonc) || 0))}</td></tr>`).join('')}
-      ${postes.length ? '' : vides(3, 4)}
-      <tr class="tot"><td>Total</td><td class="n">${postes.length ? money(tp.i) : ''}</td><td class="n">${postes.length ? money(tp.fo) : ''}</td><td class="n">${postes.length ? money(tp.t) : ''}</td></tr>
-      </tbody></table>`;
+      <tr class="tot"><td>Total</td><td class="n">${money(tp.i)}</td><td class="n">${money(tp.fo)}</td><td class="n">${money(tp.t)}</td></tr>
+      </tbody></table>` : '';
   const ress = `<section class="p-sec">${h('Ressources nécessaires')}
       <p class="p-sub">Budget</p>${aide(AIDE.budget)}
+      <p class="p-txt">Budget global : <b>${money(f.Budget_Global) || '....................'}</b>${rep ? '   (' + esc(rep) + ')' : ''}</p>
       ${posteTab}
       <p class="p-sub" style="margin-top:3mm">Ressources humaines</p>
       ${duo(sub('Ressources actuelles', c.rh.actuelles, 2, AIDE.rhActuelles), sub('Nouveaux besoins', c.rh.besoins, 2, AIDE.rhBesoins))}
