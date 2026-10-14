@@ -425,7 +425,7 @@ function pick(table, obj){ const c = COLS[table]; if (!c) return obj; const o = 
 async function apply(actions){ const r = await grist.docApi.applyUserActions(actions); return r.retValues; }
 async function fetchSafe(t){ try { return rows(await grist.docApi.fetchTable(t)); } catch(e){ console.warn('Table illisible : ' + t, e); return []; } }
 const collabName = id => (S.collabById[id] || {}).Nom_Prenom || '';
-const nomPath = p => p === 'Porteur' ? 'Porteur_Saisi' : p + 'Nom';
+const nomPath = p => p === 'Porteur' ? 'Porteur_Saisi' : p === 'Sponsor_CODIR' ? 'contenu.sponsorNom' : p + 'Nom';
 const pers = (id, nom) => collabName(id) || nom || '';
 const findCollab = nom => { const n = String(nom || '').trim().toLowerCase(); return n ? S.collab.find(c => c.Nom_Prenom.toLowerCase() === n) : null; };
 const grpOf = id => { const c = S.collabById[id]; return c ? (S.grpById[c.Groupement] || '') : ''; };
@@ -563,6 +563,7 @@ function parseContenu(s, r = {}){
     postes: (o.postes || []).map(x => ({ uid:x.uid || uid(), poste:'', inv:'', fonc:'', ...x })),
     rh: o.rh ? { actuelles:'', besoins:'', ...o.rh } : { actuelles:t('Ressources'), besoins:'' },
     risques: risques.map(x => ({ uid:x.uid || uid(), risque:x.risque || '', solution:x.solution || '' })),
+    sponsorNom: o.sponsorNom || '',
     vigilance: o.vigilance ?? t('Points_Vigilance'),
     impactEnv: o.impactEnv ?? t('Impact_Environnemental'),
     actions: (o.actions || []).map(a => ({ uid:a.uid || uid(), libelle:'', porteur:0, debut:'', echeance:'', commentaire:'', ...a, taches:(a.taches || []).map(t => ({ uid:t.uid || uid(), libelle:'', porteur:0, debut:'', echeance:'', ...t })) })),
@@ -582,6 +583,7 @@ function fromRow(r){
     Ressources:t('Ressources'),
     Risques:t('Risques'), Contraintes:t('Contraintes'), Indicateurs:t('Indicateurs'),
     Statut_Fiche:r.Statut_Fiche || 'Brouillon', Date_Decision:iso(r.Date_Decision), Avis_Direction:t('Avis_Direction'),
+    Sponsor_CODIR:r.Sponsor_CODIR || 0,
     Projet_Cree:r.Projet_Cree || 0, Lien_PE:L(r.Lien_PE), Lien_SDACR:L(r.Lien_SDACR),
     Cree_Par:t('Cree_Par'), Cree_Le:iso(r.Cree_Le), contenu:parseContenu(r.Contenu_Brouillon, r)
   };
@@ -621,6 +623,7 @@ function toFields(f){
   flatten(f);
   return pick(T.FICHES, {
     Points_Vigilance:f.contenu.vigilance || '', Impact_Environnemental:f.contenu.impactEnv || '',
+    Sponsor_CODIR:f.Sponsor_CODIR || 0,
     Titre:f.Titre.trim(), Porteur:f.Porteur || 0, Porteur_Saisi:f.Porteur ? '' : (f.Porteur_Saisi || ''),
     Contexte:f.Contexte, Descriptif:f.Descriptif, Benefices:f.Benefices, Sans_Projet:f.Sans_Projet,
     Perimetre:f.Perimetre, Hors_Perimetre:f.Hors_Perimetre, Parties_Prenantes:f.Parties_Prenantes, Groupements_Impactes:toList(f.Groupements_Impactes),
@@ -932,7 +935,7 @@ function renderForm(){
     ${fld('Titre du projet', inp('Titre', f.Titre, 'text', 'placeholder="Intitulé du projet"'), 'full titre')}
     ${fld('Porteur', selCollab('Porteur', f.Porteur))}
     <div class="fld"><span>Groupement</span><div class="ro" id="grp">${esc(grpOf(f.Porteur)) || (f.Porteur_Saisi ? 'Non déterminé (nom saisi manuellement)' : 'Déduit du porteur')}</div></div>
-    <div class="fld"><span>Sous-direction</span><div class="ro" id="sdir">${esc(sdirTxt(f))}</div></div>
+    ${fld('Sponsor CODIR', selCollab('Sponsor_CODIR', f.Sponsor_CODIR))}
   </div></section>
 
   <section class="sec"><h3>Pourquoi ce projet</h3><div class="sec-body">
@@ -1372,7 +1375,7 @@ function buildPrint(){
   const liste = a => { const l = clean(a); if (!l.length) return ''; return l.length > 1 ? `<ul class="p-ul">${l.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : `<span class="p-txt">${esc(l[0])}</span>`; };
   const rep = [f.Budget_Investissement !== '' && f.Budget_Investissement != null ? 'Invest. ' + money(f.Budget_Investissement) : '', f.Budget_Fonctionnement !== '' && f.Budget_Fonctionnement != null ? 'Fonct. ' + money(f.Budget_Fonctionnement) : ''].filter(Boolean).join(' / ');
   const meta = [
-    ['Porteur', pers(f.Porteur, f.Porteur_Saisi)], ['Groupement', grpOf(f.Porteur)], ['Sous-direction', sdirOf(f.Porteur)], ['Début souhaité', fr(f.Date_Debut_Souhaitee)],
+    ['Porteur', pers(f.Porteur, f.Porteur_Saisi)], ['Groupement', grpOf(f.Porteur)], ['Sponsor CODIR', pers(f.Sponsor_CODIR, c.sponsorNom)], ['Début souhaité', fr(f.Date_Debut_Souhaitee)],
     ['Échéance', fr(f.Echeance)], ['Budget global', money(f.Budget_Global)], ['Répartition', rep]
   ];
 
