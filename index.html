@@ -385,7 +385,7 @@ const AIDE = {
 };
 
 /* ===================== État ===================== */
-const S = { fiches:[], cur:null, dirty:false, collab:[], collabById:{}, grpById:{}, sdirByGrp:{}, sdirMeta:null, align:{ Lien_PE:[], Lien_SDACR:[] }, alTab:'Lien_PE', alQ:'', alOpen:new Set(), grps:[], histo:[], q:'', fs:'', busy:false, ready:false };
+const S = { fiches:[], cur:null, dirty:false, collab:[], collabById:{}, grpById:{}, sdirByGrp:{}, sdirMeta:null, align:{ Lien_PE:[], Lien_SDACR:[] }, sponsors:[], alTab:'Lien_PE', alQ:'', alOpen:new Set(), grps:[], histo:[], q:'', fs:'', busy:false, ready:false };
 const CH = {};    // choix des colonnes : "Table.Colonne" -> [...]
 const COLS = {};  // colonnes existantes : "Table" -> Set
 const CMETA = {}; // "Table.Colonne" -> { type, display }
@@ -425,7 +425,7 @@ function pick(table, obj){ const c = COLS[table]; if (!c) return obj; const o = 
 async function apply(actions){ const r = await grist.docApi.applyUserActions(actions); return r.retValues; }
 async function fetchSafe(t){ try { return rows(await grist.docApi.fetchTable(t)); } catch(e){ console.warn('Table illisible : ' + t, e); return []; } }
 const collabName = id => (S.collabById[id] || {}).Nom_Prenom || '';
-const nomPath = p => p === 'Porteur' ? 'Porteur_Saisi' : p === 'Sponsor_CODIR' ? 'contenu.sponsorNom' : p + 'Nom';
+const nomPath = p => p === 'Porteur' ? 'Porteur_Saisi' : p + 'Nom';
 const pers = (id, nom) => collabName(id) || nom || '';
 const findCollab = nom => { const n = String(nom || '').trim().toLowerCase(); return n ? S.collab.find(c => c.Nom_Prenom.toLowerCase() === n) : null; };
 const grpOf = id => { const c = S.collabById[id]; return c ? (S.grpById[c.Groupement] || '') : ''; };
@@ -522,6 +522,13 @@ async function loadRefs(){
     S.alDiag[k] = out.length ? '' : `La table ${tRecap} contient ${recap.length} ligne(s), mais ${cSous} et ${cRes} n'ont pas pu être lus (exemple de valeurs : ${JSON.stringify(ex[cSous])} / ${JSON.stringify(ex[cRes])}).`;
     return out;
   };
+  // Sponsors CODIR : libellé lu dans la colonne Sponsor_CODIR (texte ou référence)
+  const tSp = tableOf('Sponsor_CODIR'), cSp = tSp ? colOf(tSp, 'Sponsor_CODIR') : '';
+  if (tSp && cSp){
+    const sp = await fetchSafe(tSp), lblSp = await refLabels(tSp, cSp);
+    const show = v => (typeof v === 'number' && lblSp) ? String(lblSp[v] ?? '') : (v == null || typeof v === 'object') ? '' : String(v);
+    S.sponsors = sp.map(r => ({ id:r.id, label:show(r[cSp]).trim() })).filter(x => x.label).sort((a, b) => a.label.localeCompare(b.label, 'fr'));
+  } else S.sponsors = [];
   S.alDiag = {};
   S.align.Lien_PE = build('Lien_PE', T.PE, pe, tPE, T.APE, ape, tAPE, LBL.PE);
   S.align.Lien_SDACR = build('Lien_SDACR', T.SDACR, sd, tSD, T.ASDACR, asd, tASD, LBL.SD);
@@ -563,7 +570,6 @@ function parseContenu(s, r = {}){
     postes: (o.postes || []).map(x => ({ uid:x.uid || uid(), poste:'', inv:'', fonc:'', ...x })),
     rh: o.rh ? { actuelles:'', besoins:'', ...o.rh } : { actuelles:t('Ressources'), besoins:'' },
     risques: risques.map(x => ({ uid:x.uid || uid(), risque:x.risque || '', solution:x.solution || '' })),
-    sponsorNom: o.sponsorNom || '',
     vigilance: o.vigilance ?? t('Points_Vigilance'),
     impactEnv: o.impactEnv ?? t('Impact_Environnemental'),
     actions: (o.actions || []).map(a => ({ uid:a.uid || uid(), libelle:'', porteur:0, debut:'', echeance:'', commentaire:'', ...a, taches:(a.taches || []).map(t => ({ uid:t.uid || uid(), libelle:'', porteur:0, debut:'', echeance:'', ...t })) })),
@@ -667,6 +673,13 @@ function selCollab(p, v){
   const saisi = getPath(S.cur, nomPath(p)) || '';
   const libre = !v && saisi;
   return `<input type="text" list="dl-collab" data-p="${p}" data-collab value="${esc(collabName(v) || saisi)}" placeholder="Choisir ou saisir un nom" autocomplete="off" class="${libre ? 'libre' : ''}" title="${libre ? 'Nom saisi manuellement : absent de la table Collaborateur' : ''}" ${D()}>`;
+}
+/* Sponsor CODIR : référence vers la table Sponsor_CODIR (colonne affichée Sponsor_CODIR) */
+const sponsorName = id => (S.sponsors.find(x => x.id === id) || {}).label || '';
+function selSponsor(v){
+  const o = S.sponsors.map(x => `<option value="${x.id}" ${x.id === v ? 'selected' : ''}>${esc(x.label)}</option>`).join('');
+  const inconnu = v && !S.sponsors.some(x => x.id === v) ? `<option value="${v}" selected>Sponsor n°${v}</option>` : '';
+  return `<select data-p="Sponsor_CODIR" data-t="n" ${D()}><option value="">${S.sponsors.length ? 'Choisir un sponsor' : 'Table Sponsor_CODIR introuvable ou vide'}</option>${o}${inconnu}</select>`;
 }
 function getPath(obj, path){ return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj); }
 function resolveCollab(el){
@@ -935,7 +948,7 @@ function renderForm(){
     ${fld('Titre du projet', inp('Titre', f.Titre, 'text', 'placeholder="Intitulé du projet"'), 'full titre')}
     ${fld('Porteur', selCollab('Porteur', f.Porteur))}
     <div class="fld"><span>Groupement</span><div class="ro" id="grp">${esc(grpOf(f.Porteur)) || (f.Porteur_Saisi ? 'Non déterminé (nom saisi manuellement)' : 'Déduit du porteur')}</div></div>
-    ${fld('Sponsor CODIR', selCollab('Sponsor_CODIR', f.Sponsor_CODIR))}
+    ${fld('Sponsor CODIR', selSponsor(f.Sponsor_CODIR))}
   </div></section>
 
   <section class="sec"><h3>Pourquoi ce projet</h3><div class="sec-body">
@@ -1375,7 +1388,7 @@ function buildPrint(){
   const liste = a => { const l = clean(a); if (!l.length) return ''; return l.length > 1 ? `<ul class="p-ul">${l.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : `<span class="p-txt">${esc(l[0])}</span>`; };
   const rep = [f.Budget_Investissement !== '' && f.Budget_Investissement != null ? 'Invest. ' + money(f.Budget_Investissement) : '', f.Budget_Fonctionnement !== '' && f.Budget_Fonctionnement != null ? 'Fonct. ' + money(f.Budget_Fonctionnement) : ''].filter(Boolean).join(' / ');
   const meta = [
-    ['Porteur', pers(f.Porteur, f.Porteur_Saisi)], ['Groupement', grpOf(f.Porteur)], ['Sponsor CODIR', pers(f.Sponsor_CODIR, c.sponsorNom)], ['Début souhaité', fr(f.Date_Debut_Souhaitee)],
+    ['Porteur', pers(f.Porteur, f.Porteur_Saisi)], ['Groupement', grpOf(f.Porteur)], ['Sponsor CODIR', sponsorName(f.Sponsor_CODIR)], ['Début souhaité', fr(f.Date_Debut_Souhaitee)],
     ['Échéance', fr(f.Echeance)], ['Budget global', money(f.Budget_Global)], ['Répartition', rep]
   ];
 
